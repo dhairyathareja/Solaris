@@ -26,6 +26,7 @@ async function extractBillData(base64Image, mediaType) {
       apiKey: process.env.ANTHROPIC_API_KEY, // defaults to process.env.ANTHROPIC_API_KEY
     });
 
+    // Make an API call to Claude Vision model passing the base64-encoded image of the electricity bill
     const response = await anthropic.messages.create({
       model: 'claude-3-5-sonnet-20241022',
       max_tokens: 1024,

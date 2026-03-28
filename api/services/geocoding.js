@@ -1,5 +1,9 @@
 const axios = require('axios');
 
+/**
+ * Converts a plain text address into Latitude and Longitude coordinates.
+ * Connects to OpenStreetMap's Nominatim public API.
+ */
 async function geocodeAddress(address) {
   const url = 'https://nominatim.openstreetmap.org/search';
   try {
@@ -7,10 +11,10 @@ async function geocodeAddress(address) {
       params: {
         q: address,
         format: 'json',
-        limit: 1,
+        limit: 1, // Only fetch the top most relevant result
       },
       headers: {
-        'User-Agent': 'SOLARIS-Solar-App/1.0',
+        'User-Agent': 'SOLARIS-Solar-App/1.0', // Custom User-Agent to respect OSM's acceptable use policy
       },
       timeout: 15000,
     });

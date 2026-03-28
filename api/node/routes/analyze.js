@@ -1,8 +1,6 @@
 const express = require('express');
 const multer = require('multer');
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 
 const { extractTextFromImage } = require('../services/ocr');
@@ -17,12 +15,9 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const PERFORMANCE_RATIO = 0.78;
 const DAYS_PER_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://python:5000';
+const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://localhost:5000';
 const NET_METERING_RATE = 2.5;
-
-const DEMO_BUILDINGS = JSON.parse(
-  fs.readFileSync(path.join(__dirname, '..', 'data', 'demo_buildings.json'), 'utf8'),
-);
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function errorJson(error, detail) {
   return { error, detail };
@@ -30,6 +25,66 @@ function errorJson(error, detail) {
 
 function sendError(res, status, error, detail) {
   return res.status(status).json(errorJson(error, detail));
+}
+
+function round1(value) {
+  return Math.round(Number(value) * 10) / 10;
+}
+
+function median(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) return (sorted[mid - 1] + sorted[mid]) / 2;
+  return sorted[mid];
+}
+
+function mode(values) {
+  if (!values.length) return null;
+  const count = new Map();
+  for (const val of values) {
+    count.set(val, (count.get(val) || 0) + 1);
+  }
+
+  let best = null;
+  let bestCount = -1;
+  for (const [val, c] of count.entries()) {
+    if (c > bestCount) {
+      best = val;
+      bestCount = c;
+    }
+  }
+  return best;
+}
+
+function pickFirst(values) {
+  return values.length ? values[0] : null;
+}
+
+function estimateMonthlyUnits(monthValues) {
+  const detectedCount = monthValues.filter((v) => v != null).length;
+  if (detectedCount === 0) {
+    return {
+      monthly_units: [],
+      months_detected: 0,
+      months_estimated: 0,
+    };
+  }
+
+  const known = monthValues.filter((v) => v != null);
+  const avg = known.reduce((a, b) => a + b, 0) / known.length;
+  const seasonalFactors = [0.96, 0.95, 0.98, 1.02, 1.08, 1.12, 1.1, 1.06, 1.01, 0.99, 0.96, 0.94];
+
+  const monthlyUnits = monthValues.map((value, idx) => {
+    if (value != null) return round1(value);
+    return round1(avg * seasonalFactors[idx]);
+  });
+
+  return {
+    monthly_units: monthlyUnits,
+    months_detected: detectedCount,
+    months_estimated: 12 - detectedCount,
+  };
 }
 
 function toAnnualChangePct(monthlyUnits) {
@@ -40,25 +95,17 @@ function toAnnualChangePct(monthlyUnits) {
   return ((last - first) * 12 / monthlyUnits.length / first) * 100;
 }
 
-function localForecast(monthlyUnits) {
-  const base = monthlyUnits.map((v) => Number(v));
-  const annual = base.reduce((a, b) => a + b, 0);
-  const annualChangePct = toAnnualChangePct(base);
-  let trend = 'stable';
-  if (annualChangePct > 2) trend = 'increasing';
-  if (annualChangePct < -2) trend = 'decreasing';
-  return {
-    forecast_monthly_kwh: base,
-    forecast_annual_kwh: annual,
-    trend,
-    annual_change_pct: Math.round(annualChangePct * 100) / 100,
-    model: 'demo_static',
-  };
-}
-
 async function callPython(endpoint, payload, timeout = 20000) {
-  const response = await axios.post(`${PYTHON_SERVICE_URL}${endpoint}`, payload, { timeout });
-  return response.data;
+  try {
+    const response = await axios.post(`${PYTHON_SERVICE_URL}${endpoint}`, payload, { timeout });
+    return response.data;
+  } catch (error) {
+    const code = error.code || error.cause?.code;
+    if (code === 'ECONNREFUSED' || code === 'ENOTFOUND') {
+      throw new Error('Python compute service is unavailable. Start api/python on port 5000 or set PYTHON_SERVICE_URL.');
+    }
+    throw error;
+  }
 }
 
 async function getMonthlyIrradiance(lat, lon) {
@@ -150,36 +197,118 @@ router.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-router.post('/analyze-bill', upload.single('file'), async (req, res) => {
+router.post('/analyze-bill', upload.any(), async (req, res) => {
   try {
-    const file = req.file;
-    if (!file) {
+    const files = (req.files || []).filter((item) => item.fieldname === 'file' || item.fieldname === 'files');
+    if (!files.length) {
       return sendError(res, 400, 'validation_error', 'No file uploaded');
     }
 
-    const allowed = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
-    if (!allowed.has(file.mimetype)) {
-      return sendError(res, 400, 'validation_error', 'Unsupported file type. Use JPG, PNG, WebP or GIF.');
+    if (files.length > 12) {
+      return sendError(res, 400, 'validation_error', 'Upload up to 12 bill images at a time.');
     }
 
-    const text = await extractTextFromImage(file.buffer);
-    const parsed = parseBillText(text);
+    const allowed = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+    for (const file of files) {
+      if (!allowed.has(file.mimetype)) {
+        return sendError(res, 400, 'validation_error', 'Unsupported file type. Use JPG, PNG, WebP or GIF.');
+      }
+    }
+
     const sessionId = crypto.randomUUID();
+
+    const monthValues = Array(12).fill(null);
+    const unassignedUnits = [];
+    const tariffValues = [];
+    const loadValues = [];
+    const categories = [];
+    const discoms = [];
+    const states = [];
+    const extractedMonths = [];
+
+    for (const file of files) {
+      const text = await extractTextFromImage(file.buffer);
+      const parsed = parseBillText(text);
+
+      const monthIdx = Number.isInteger(parsed.billing_month_index) ? parsed.billing_month_index : null;
+      const monthLabel = monthIdx != null ? MONTHS[monthIdx] : null;
+      const billedUnits = Number.isFinite(Number(parsed.billed_units_kwh)) ? Number(parsed.billed_units_kwh) : null;
+
+      extractedMonths.push({
+        file_name: file.originalname,
+        billing_month: monthLabel,
+        units_kwh: billedUnits,
+      });
+
+      if (Number.isFinite(Number(parsed.tariff_per_unit))) {
+        tariffValues.push(Number(parsed.tariff_per_unit));
+      }
+      if (Number.isFinite(Number(parsed.sanctioned_load_kw))) {
+        loadValues.push(Number(parsed.sanctioned_load_kw));
+      }
+      if (parsed.tariff_category) categories.push(parsed.tariff_category);
+      if (parsed.discom_name) discoms.push(parsed.discom_name);
+      if (parsed.state) states.push(parsed.state);
+
+      if (Array.isArray(parsed.monthly_units) && parsed.monthly_units.length === 12) {
+        parsed.monthly_units.forEach((value, idx) => {
+          const num = Number(value);
+          if (!Number.isFinite(num)) return;
+          if (monthValues[idx] == null) {
+            monthValues[idx] = num;
+          }
+        });
+      }
+
+      if (billedUnits != null) {
+        if (monthIdx != null) {
+          if (monthValues[monthIdx] == null) {
+            monthValues[monthIdx] = billedUnits;
+          } else {
+            monthValues[monthIdx] = round1((monthValues[monthIdx] + billedUnits) / 2);
+          }
+        } else {
+          unassignedUnits.push(billedUnits);
+        }
+      }
+    }
+
+    for (const value of unassignedUnits) {
+      const idx = monthValues.findIndex((v) => v == null);
+      if (idx === -1) break;
+      monthValues[idx] = value;
+    }
+
+    const monthlyResult = estimateMonthlyUnits(monthValues);
+    const responsePayload = {
+      session_id: sessionId,
+      monthly_units: monthlyResult.monthly_units,
+      sanctioned_load_kw: loadValues.length ? round1(loadValues[0]) : null,
+      tariff_per_unit: tariffValues.length ? round1(median(tariffValues)) : null,
+      tariff_category: mode(categories),
+      discom_name: pickFirst(discoms),
+      state: pickFirst(states),
+      parse_confidence: monthlyResult.months_detected >= 6 ? 'high' : monthlyResult.months_detected >= 3 ? 'medium' : 'low',
+      bills_processed: files.length,
+      months_detected: monthlyResult.months_detected,
+      months_estimated: monthlyResult.months_estimated,
+      extracted_months: extractedMonths,
+    };
 
     if (isDbConnected()) {
       await models.BillExtraction.create({
         session_id: sessionId,
-        monthly_units: parsed.monthly_units,
-        sanctioned_load_kw: parsed.sanctioned_load_kw,
-        tariff_per_unit: parsed.tariff_per_unit,
-        tariff_category: parsed.tariff_category,
-        discom_name: parsed.discom_name,
-        state: parsed.state,
-        parse_confidence: parsed.parse_confidence,
+        monthly_units: responsePayload.monthly_units,
+        sanctioned_load_kw: responsePayload.sanctioned_load_kw,
+        tariff_per_unit: responsePayload.tariff_per_unit,
+        tariff_category: responsePayload.tariff_category,
+        discom_name: responsePayload.discom_name,
+        state: responsePayload.state,
+        parse_confidence: responsePayload.parse_confidence,
       });
     }
 
-    return res.json({ session_id: sessionId, ...parsed });
+    return res.json(responsePayload);
   } catch (error) {
     console.error('analyze-bill error:', error.message);
     return sendError(res, 500, 'analysis_error', 'Bill analysis failed.');
@@ -356,98 +485,6 @@ router.post('/generate-report', async (req, res) => {
     res.write(`data: ${JSON.stringify(errorJson('report_error', 'Report generation failed.'))}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
-  }
-});
-
-router.get('/demo/:buildingId', async (req, res) => {
-  try {
-    const demo = DEMO_BUILDINGS.find((item) => item.id === req.params.buildingId);
-    if (!demo) {
-      return sendError(res, 404, 'not_found', 'Demo building not found.');
-    }
-
-    const sessionId = crypto.randomUUID();
-    const monthlyUnits = demo.bill_data.monthly_units;
-    const forecast = localForecast(monthlyUnits);
-    const loadProfile = await callPython('/load-profile', {
-      tariff_category: demo.bill_data.tariff_category,
-    });
-    const avgGhi = demo.irradiance_monthly.reduce((a, b) => a + b, 0) / demo.irradiance_monthly.length;
-
-    let compute = await callPython('/compute', {
-      annual_kwh: Number(forecast.forecast_annual_kwh),
-      avg_ghi: avgGhi,
-      tariff_per_unit: demo.bill_data.tariff_per_unit,
-      self_consumption_ratio: loadProfile.self_consumption_ratio,
-      export_ratio: loadProfile.export_ratio,
-    });
-
-    let rooftopCheck = await callPython('/validate-rooftop', {
-      num_panels: compute.num_panels,
-      rooftop_sqm: Number(demo.rooftop.rooftop_sqm),
-    });
-
-    if (rooftopCheck.status === 'constrained' && Number(rooftopCheck.fitted_kwp) > 0) {
-      compute = await callPython('/compute', {
-        annual_kwh: Number(forecast.forecast_annual_kwh),
-        avg_ghi: avgGhi,
-        tariff_per_unit: demo.bill_data.tariff_per_unit,
-        self_consumption_ratio: loadProfile.self_consumption_ratio,
-        export_ratio: loadProfile.export_ratio,
-        system_kwp_override: Number(rooftopCheck.fitted_kwp),
-      });
-
-      rooftopCheck = await callPython('/validate-rooftop', {
-        num_panels: compute.num_panels,
-        rooftop_sqm: Number(demo.rooftop.rooftop_sqm),
-      });
-    }
-
-    const payload = {
-      ...demo.bill_data,
-      tariff_per_unit: demo.bill_data.tariff_per_unit,
-      tariff_category: demo.bill_data.tariff_category,
-      rooftop_sqm: demo.rooftop.rooftop_sqm,
-      estimation_method: demo.rooftop.estimation_method,
-      address: demo.label,
-      discom_name: demo.bill_data.discom_name,
-      state: demo.bill_data.state,
-      sanctioned_load_kw: demo.bill_data.sanctioned_load_kw,
-    };
-
-    const responsePayload = finalizeResponse({
-      sessionId,
-      payload,
-      location: { lat: demo.lat, lon: demo.lon, address: demo.label },
-      irradianceMonthly: demo.irradiance_monthly,
-      monthlyUnits,
-      forecast,
-      loadProfile,
-      rooftopCheck,
-      compute,
-      estimationMethod: demo.rooftop.estimation_method,
-    });
-
-    if (isDbConnected()) {
-      await models.Calculation.create({
-        session_id: sessionId,
-        system_kwp: responsePayload.system_kwp,
-        num_panels: responsePayload.num_panels,
-        rooftop_status: responsePayload.rooftop_check?.status,
-        area_warning: responsePayload.rooftop_check?.warning || null,
-        monthly_gen_kwh: responsePayload.monthly_gen_kwh,
-        self_consumption_ratio: responsePayload.load_profile?.self_consumption_ratio,
-        export_ratio: responsePayload.load_profile?.export_ratio,
-        financial: responsePayload.financial,
-        forecast: responsePayload.forecast,
-        irradiance_monthly: responsePayload.irradiance_monthly,
-      });
-    }
-
-    return res.json(responsePayload);
-  } catch (error) {
-    console.error('demo error:', error.message);
-    return sendError(res, 500, 'demo_error', 'Demo simulation failed.');
   }
 });
 

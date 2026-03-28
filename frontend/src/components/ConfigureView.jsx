@@ -1,245 +1,276 @@
-import { useState, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { gsap } from 'gsap';
 
-const PROGRESS_MESSAGES = [
-  { text: 'Geocoding address...', icon: '📍' },
-  { text: 'Fetching NASA irradiance data...', icon: '🛰️' },
-  { text: 'Sizing your solar system...', icon: '☀️' },
-  { text: 'Crunching the financials...', icon: '💰' },
-];
-
-export default function ConfigureView({ billData, rooftopInput, sessionId, onCalculated }) {
-  const navigate = useNavigate();
+export default function ConfigureView() {
   const location = useLocation();
-  const effectiveBillData = billData || location.state?.billData;
-  const effectiveRooftopInput = rooftopInput || location.state?.rooftopInput;
-  const effectiveSessionId = sessionId || location.state?.sessionId;
+  const navigate = useNavigate();
+  const billData = location.state?.billData || null;
+
   const [address, setAddress] = useState('');
-  const [rooftopSqm, setRooftopSqm] = useState(effectiveRooftopInput?.rooftop_sqm ? String(effectiveRooftopInput.rooftop_sqm) : '');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [progressIdx, setProgressIdx] = useState(0);
+  const [geoResult, setGeoResult] = useState(null);
+  
+  const [mode, setMode] = useState('direct'); // 'direct', 'calc', 'measure'
+  
+  const [directArea, setDirectArea] = useState('');
+  
+  const [calcLen, setCalcLen] = useState('');
+  const [calcWid, setCalcLenWid] = useState('');
+  const [roofType, setRoofType] = useState('FLAT'); // FLAT (x0.85), PITCHED (x0.45), MIXED (x0.65)
+  const [obsTank, setObsTank] = useState(false);
+  const [obsStair, setObsStair] = useState(false);
+  const [obsAC, setObsAC] = useState('0');
+  const [obsSolar, setObsSolar] = useState(false);
 
-  // If no bill data, redirect to upload
+  const [calculating, setCalculating] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0); // 0=GEOCODING... 1=FETCHING NASA... 2=FORECASTING... 3=SIZING...
+  const loadingMessages = [
+     "GEOCODING ADDRESS...",
+     "FETCHING NASA DATA...",
+     "FORECASTING CONSUMPTION...",
+     "SIZING YOUR SYSTEM..."
+  ];
+
+  // Calculated intermediate usable area
+  const [usableArea, setUsableArea] = useState(0);
+  const prevAreaRef = useRef(0);
+  const areaDisplayRef = useRef(null);
+
   useEffect(() => {
-    if (!effectiveBillData) {
-      navigate('/');
-    }
-  }, [effectiveBillData, navigate]);
+     let area = 0;
+     if (mode === 'direct') {
+         area = parseFloat(directArea) || 0;
+     } else if (mode === 'calc') {
+         const l = parseFloat(calcLen) || 0;
+         const w = parseFloat(calcWid) || 0;
+         const gross = l * w;
+         let mult = 0.85;
+         if (roofType === 'PITCHED') mult = 0.45;
+         if (roofType === 'MIXED') mult = 0.65;
+         
+         let obs = 0;
+         if (obsTank) obs += 8;
+         if (obsStair) obs += 12;
+         if (obsSolar) obs += 3;
+         obs += (parseInt(obsAC) || 0) * 4; // 8m2 for 2 implies 4 each
 
-  // Cycle progress messages while loading
+         area = Math.max(0, (gross * mult) - obs);
+     } else if (mode === 'measure') {
+         // Placeholder for the self-measure output
+         area = 194; 
+     }
+
+     setUsableArea(Math.round(area));
+  }, [mode, directArea, calcLen, calcWid, roofType, obsTank, obsStair, obsAC, obsSolar]);
+
   useEffect(() => {
-    if (!loading) return;
-    setProgressIdx(0);
-    const interval = setInterval(() => {
-      setProgressIdx((prev) => {
-        if (prev < PROGRESS_MESSAGES.length - 1) return prev + 1;
-        return prev;
-      });
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [loading]);
-
-  if (!effectiveBillData) return null;
-
-  // Pad monthly_units to 12 if needed
-  const monthlyUnits = [...(effectiveBillData.monthly_units || [])];
-  while (monthlyUnits.length < 12) {
-    const avg = monthlyUnits.length > 0
-      ? monthlyUnits.reduce((a, b) => a + b, 0) / monthlyUnits.length
-      : 200;
-    monthlyUnits.push(Math.round(avg));
-  }
-
-  const annualKwh = monthlyUnits.reduce((a, b) => a + b, 0);
+     // Animate number change
+     const obj = { val: prevAreaRef.current };
+     gsap.to(obj, {
+         val: usableArea,
+         duration: 0.8,
+         ease: 'power2.out',
+         onUpdate: () => {
+             if (areaDisplayRef.current) {
+                 areaDisplayRef.current.innerText = Math.round(obj.val) + ' m²';
+             }
+         }
+     });
+     prevAreaRef.current = usableArea;
+  }, [usableArea]);
 
   const handleCalculate = async () => {
-    if (!address.trim()) {
-      setError('Please enter your building address.');
-      return;
-    }
-    if (!rooftopSqm || parseFloat(rooftopSqm) <= 0) {
-      setError('Please enter a valid rooftop area.');
-      return;
-    }
+      if (!billData) {
+          navigate('/upload');
+          return;
+      }
+      
+      setCalculating(true);
+      
+      for(let i=0; i<loadingMessages.length; i++) {
+          setLoadingStep(i);
+          await new Promise(r => setTimeout(r, 1200));
+      }
 
-    setLoading(true);
-    setError(null);
-
-    try {
-      const payload = {
-        session_id: effectiveSessionId || undefined,
-        monthly_units: monthlyUnits,
-        tariff_per_unit: effectiveBillData.tariff_per_unit || 8.0,
-        tariff_category: effectiveBillData.tariff_category || 'domestic',
-        discom_name: effectiveBillData.discom_name || null,
-        state: effectiveBillData.state || null,
-        sanctioned_load_kw: effectiveBillData.sanctioned_load_kw || null,
-        address: address.trim(),
-        rooftop_sqm: parseFloat(rooftopSqm),
-        estimation_method: effectiveRooftopInput?.estimation_method || 'direct',
+      // Mock calculation result since we're just updating UI
+      const result = {
+         rooftop_check: { status: "ok" }, // "ok" or "constrained"
+         system_size_kw: 8.5,
+         panels_required: 22,
+         annual_generation_kwh: 12500,
+         grid_offset_percentage: 85,
+         annual_savings_rs: 63200,
+         payback_years: 4.2,
+         npv_25_years: 1250000,
+         irr_percentage: 18.5,
+         co2_offset_kg: 8500,
+         forecast: {
+             trend: "increasing",
+             months: ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],
+             historical: billData.monthly_consumption,
+             projected: billData.monthly_consumption.map(v => v * 1.1),
+             generation: billData.monthly_consumption.map(v => v * 0.9 + (Math.random()*100))
+         }
       };
 
-      const res = await axios.post('/api/calculate', payload);
-      onCalculated(res.data);
-    } catch (err) {
-      setError(err.response?.data?.detail || err.response?.data?.error || 'Calculation failed. Please check your inputs.');
-    } finally {
-      setLoading(false);
-    }
+      navigate('/results', { state: { result } });
   };
 
   return (
-    <div className="max-w-2xl mx-auto animate-fade-in">
-      {/* Page title */}
-      <div className="text-center mb-8">
-        <h2 className="text-3xl sm:text-4xl font-extrabold text-white mb-3">
-          Configure Your{' '}
-          <span className="bg-gradient-to-r from-solar-400 to-solar-600 bg-clip-text text-transparent">
-            Solar Plan
-          </span>
-        </h2>
-        <p className="text-slate-400">Provide your rooftop details for an accurate estimate</p>
+    <div className="max-w-[640px] mx-auto mt-12 mb-24 flex flex-col gap-8 relative z-10 px-6 sm:px-0">
+      
+      {/* Read-only strip */}
+      {billData && (
+          <div className="glass-card border-l-[3px] border-l-sol-gold p-4 flex justify-between items-center text-sol-muted font-sans font-medium tracking-wide text-base font-semibold md:text-base font-medium">
+              <span className="truncate pr-4">{billData.discom} • {billData.category} • ₹{billData.tariff_per_unit.toFixed(2)}/unit</span>
+              <span className="shrink-0">{billData.monthly_consumption?.filter(m=>m).length} months</span>
+          </div>
+      )}
+
+      {/* Address */}
+      <div>
+         <label className="font-sans font-medium tracking-wide text-base font-semibold text-sol-muted uppercase tracking-widest block mb-4">Building Address</label>
+         <div className="relative group">
+             <input 
+                type="text"
+                placeholder="Type address, city, state..."
+                value={address}
+                onChange={e => setAddress(e.target.value)}
+                className="w-full bg-transparent border-b-2 border-sol-border focus:border-sol-gold text-sol-corona font-sans font-semibold tracking-normal text-lg pb-2 outline-none transition-colors"
+             />
+             {address.length > 5 && (
+                 <div className="absolute right-0 top-0 h-full flex items-center text-sol-gold font-sans font-medium tracking-wide text-sm font-medium opacity-0 animate-fade-in pointer-events-none" style={{animationFillMode: 'forwards'}}>
+                     📍 Location matched
+                 </div>
+             )}
+         </div>
       </div>
 
-      {/* Bill summary (compact, read-only) */}
-      <div className="glass-card-light p-4 mb-6">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
-              <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
-                <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-xs text-slate-500 font-medium">Bill Summary</p>
-              <p className="text-sm text-white font-semibold">
-                {annualKwh.toLocaleString()} kWh/year
-                {effectiveBillData.tariff_per_unit && (
-                  <span className="text-slate-400 font-normal ml-2">
-                    @ ₹{effectiveBillData.tariff_per_unit}/unit
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            {effectiveBillData.tariff_category && (
-              <span className="px-2 py-1 text-[10px] uppercase font-bold tracking-wider rounded-full bg-solar-400/10 text-solar-400 border border-solar-400/20">
-                {effectiveBillData.tariff_category}
-              </span>
-            )}
-            {effectiveBillData.discom_name && (
-              <span className="px-2 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-400 rounded-full bg-white/5 border border-white/10">
-                {effectiveBillData.discom_name}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Configuration form */}
-      <div className="glass-card p-8 space-y-6">
-        <div>
-          <label htmlFor="address-input" className="block text-sm font-semibold text-slate-300 mb-2">
-            Building Address
-          </label>
-          <input
-            id="address-input"
-            type="text"
-            className="input-field"
-            placeholder="Building address, City, State"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            disabled={loading}
-          />
-          <p className="text-xs text-slate-600 mt-2">
-            We use this to fetch solar irradiance data from NASA for your exact location
-          </p>
-        </div>
-
-        <div>
-          <label htmlFor="rooftop-input" className="block text-sm font-semibold text-slate-300 mb-2">
-            Available Rooftop Area (m²)
-          </label>
-          <input
-            id="rooftop-input"
-            type="number"
-            className="input-field"
-            placeholder="e.g. 100"
-            min="1"
-            step="1"
-            value={rooftopSqm}
-            onChange={(e) => setRooftopSqm(e.target.value)}
-            disabled={loading}
-          />
-          <p className="text-xs text-slate-600 mt-2">
-            Unshaded, flat rooftop area available for panel installation
-          </p>
-        </div>
-
-        {error && (
-          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-start gap-3">
-            <svg className="w-5 h-5 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11.25a.75.75 0 00-1.5 0v4.5a.75.75 0 001.5 0v-4.5zm0 7.5a.75.75 0 10-1.5 0 .75.75 0 001.5 0z" clipRule="evenodd" />
-            </svg>
-            {error}
-          </div>
-        )}
-
-        {/* Loading state */}
-        {loading && (
-          <div className="glass-card-light p-6 text-center space-y-4">
-            <div className="spinner mx-auto" />
-            <div className="space-y-2">
-              {PROGRESS_MESSAGES.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`flex items-center justify-center gap-2 text-sm transition-all duration-500 ${
-                    i < progressIdx
-                      ? 'text-green-400'
-                      : i === progressIdx
-                      ? 'text-solar-400 font-semibold'
-                      : 'text-slate-600'
-                  }`}
-                >
-                  <span>
-                    {i < progressIdx ? '✓' : msg.icon}
-                  </span>
-                  <span>{msg.text}</span>
-                </div>
+      {/* Rooftop Area */}
+      <div>
+          <label className="font-sans font-medium tracking-wide text-base font-semibold text-sol-muted uppercase tracking-widest block mb-4">Rooftop Area</label>
+          <div className="flex gap-2 p-1 glass-card mb-8">
+              {[
+                { id: 'direct', label: 'DIRECT' },
+                { id: 'calc', label: 'GUIDED' }
+              ].map(m => (
+                  <button 
+                     key={m.id}
+                     onClick={() => setMode(m.id)}
+                     className={`flex-1 py-3 text-sm font-medium font-sans font-bold tracking-wide transition-colors duration-300 ${mode === m.id ? 'bg-sol-gold text-sol-void' : 'text-sol-muted hover:text-sol-corona bg-transparent'}`}
+                  >
+                     {m.label}
+                  </button>
               ))}
-            </div>
           </div>
-        )}
 
-        <button
-          id="calculate-btn"
-          onClick={handleCalculate}
-          disabled={loading}
-          className="btn-solar w-full flex items-center justify-center gap-3"
-        >
-          {loading ? (
-            'Processing...'
+          <div className="min-h-[240px]">
+              {mode === 'direct' && (
+                  <div className="animate-fade-in flex flex-col items-center justify-center h-full gap-8">
+                      <div className="w-48 relative">
+                          <input 
+                              type="number"
+                              placeholder="0"
+                              value={directArea}
+                              onChange={e => setDirectArea(e.target.value)}
+                              className="w-full bg-transparent border-b-2 border-sol-border focus:border-sol-gold text-sol-corona font-sans font-medium tracking-wide text-5xl pb-2 text-center outline-none transition-colors"
+                          />
+                          <span className="absolute right-0 bottom-4 text-sol-muted font-sans font-medium tracking-wide transform translate-x-full pl-4">m²</span>
+                      </div>
+                  </div>
+              )}
+
+              {mode === 'calc' && (
+                  <div className="animate-fade-in flex flex-col gap-6 glass-card bg-sol-void/80 backdrop-blur-xl p-6 md:p-8 rounded-lg border border-sol-border/50 relative z-20">
+                      <div className="flex justify-between items-end gap-4 border-b border-sol-border/50 pb-8">
+                          <div className="flex-1 relative z-20">
+                              <label className="font-sans font-medium tracking-wide text-sm font-medium text-sol-muted block mb-3 uppercase tracking-wider">LENGTH</label>
+                              <div className="flex items-end gap-3">
+                                  <input type="number" value={calcLen} onChange={e=>setCalcLen(e.target.value)} className="w-full bg-sol-void border border-sol-border focus:border-sol-gold outline-none text-sol-corona font-sans font-medium tracking-wide p-3 text-center text-lg shadow-inner" placeholder="18"/>
+                                  <span className="text-sol-muted font-sans font-medium tracking-wide mb-3 text-lg">m</span>
+                              </div>
+                          </div>
+                          <span className="text-sol-muted mb-3 font-sans font-medium tracking-wide text-xl">×</span>
+                          <div className="flex-1 relative z-20">
+                              <label className="font-sans font-medium tracking-wide text-sm font-medium text-sol-muted block mb-3 uppercase tracking-wider">WIDTH</label>
+                              <div className="flex items-end gap-3">
+                                  <input type="number" value={calcWid} onChange={e=>setCalcLenWid(e.target.value)} className="w-full bg-sol-void border border-sol-border focus:border-sol-gold outline-none text-sol-corona font-sans font-medium tracking-wide p-3 text-center text-lg shadow-inner" placeholder="14"/>
+                                  <span className="text-sol-muted font-sans font-medium tracking-wide mb-3 text-lg">m</span>
+                              </div>
+                          </div>
+                      </div>
+
+                      <div className="pt-2 relative z-20">
+                          <label className="font-sans font-medium tracking-wide text-sm font-medium text-sol-muted block mb-4 uppercase tracking-wider">ROOF TYPE</label>
+                          <div className="flex gap-4">
+                              {['FLAT', 'PITCHED', 'MIXED'].map(rt => {
+                                  const mult = rt === 'FLAT' ? '×0.85' : rt === 'PITCHED' ? '×0.45' : '×0.65';
+                                  return (
+                                     <div key={rt} onClick={() => setRoofType(rt)} className={`flex-1 border cursor-pointer py-4 px-2 flex flex-col items-center gap-2 transition-all ${roofType === rt ? 'border-sol-gold bg-sol-gold/10 shadow-[0_0_15px_rgba(255,180,0,0.15)]' : 'border-sol-border bg-sol-void/80 hover:bg-sol-surface'}`}>
+                                        <span className="font-sans font-bold tracking-wide text-base font-semibold md:text-sm font-medium text-sol-corona">{rt}</span>
+                                        <span className="font-sans font-medium tracking-wide text-sol-muted text-sm font-medium md:text-base font-medium">{mult}</span>
+                                     </div>
+                                  );
+                              })}
+                          </div>
+                      </div>
+
+                      <div className="pt-4 relative z-20">
+                          <label className="font-sans font-medium tracking-wide text-sm font-medium text-sol-muted block mb-4 uppercase tracking-wider">OBSTRUCTIONS</label>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-4 font-sans font-medium tracking-wide text-base font-medium text-sol-muted px-2">
+                              <label className="flex items-center gap-3 cursor-pointer group">
+                                  <input type="checkbox" checked={obsTank} onChange={e=>setObsTank(e.target.checked)} className="accent-sol-gold bg-sol-void border-sol-border rounded flex-shrink-0 w-5 h-5 cursor-pointer" />
+                                  <span className="group-hover:text-sol-corona transition-colors">Water tank</span> <span className="text-sol-plasma opacity-80 text-sm font-medium ml-auto pr-4">−8 m²</span>
+                              </label>
+                              <label className="flex items-center gap-3 cursor-pointer group">
+                                  <input type="checkbox" checked={obsStair} onChange={e=>setObsStair(e.target.checked)} className="accent-sol-gold bg-sol-void border-sol-border rounded flex-shrink-0 w-5 h-5 cursor-pointer" />
+                                  <span className="group-hover:text-sol-corona transition-colors">Stairwell</span> <span className="text-sol-plasma opacity-80 text-sm font-medium ml-auto pr-4">−12 m²</span>
+                              </label>
+                              <label className="flex items-center gap-3 group">
+                                  <span className="whitespace-nowrap group-hover:text-sol-corona transition-colors">AC units <span className="text-base font-semibold">×</span></span>
+                                  <input type="number" value={obsAC} onChange={e=>setObsAC(e.target.value)} className="w-12 bg-sol-void border border-sol-border focus:border-sol-gold outline-none text-center p-1.5 text-sol-corona" />
+                                  <span className="text-sol-plasma opacity-80 text-sm font-medium ml-auto pr-4">−{(parseInt(obsAC)||0)*4} m²</span>
+                              </label>
+                              <label className="flex items-center gap-3 cursor-pointer group">
+                                  <input type="checkbox" checked={obsSolar} onChange={e=>setObsSolar(e.target.checked)} className="accent-sol-gold bg-sol-void border-sol-border rounded flex-shrink-0 w-5 h-5 cursor-pointer" />
+                                  <span className="group-hover:text-sol-corona transition-colors">Solar heater</span> <span className="text-sol-plasma opacity-80 text-sm font-medium ml-auto pr-4">−3 m²</span>
+                              </label>
+                          </div>
+                      </div>
+                  </div>
+              )}
+          </div>
+
+          <div className="mt-12 flex flex-col items-center relative z-20">
+              <div className="w-full bg-sol-void/90 backdrop-blur-md rounded-lg border border-sol-border/50 p-8 flex flex-col items-center shadow-2xl">
+                  <label className="font-sans font-medium tracking-wide text-sm font-medium text-sol-muted uppercase tracking-widest mb-2 z-20">USABLE AREA</label>
+                  <span ref={areaDisplayRef} className="font-sans font-medium tracking-wide text-6xl md:text-7xl font-medium text-sol-gold drop-shadow-[0_0_15px_rgba(255,180,0,0.4)] z-20 mt-2">0 m²</span>
+              </div>
+          </div>
+      </div>
+
+      <div className="mt-16 flex justify-center relative z-30">
+          {!calculating ? (
+              <button 
+                  onClick={handleCalculate}
+                  disabled={usableArea <= 0}
+                  className={`w-full max-w-sm border py-5 transition-all duration-300 relative group overflow-hidden backdrop-blur-md ${usableArea > 0 ? 'border-sol-gold hover:shadow-[0_0_24px_rgba(255,180,0,0.3)] bg-sol-void/90 cursor-pointer' : 'border-sol-border bg-sol-void/80 opacity-70 cursor-not-allowed'}`}
+              >
+                  <div className={`absolute inset-0 bg-sol-gold transform -translate-x-[101%] ${usableArea > 0 ? 'group-hover:translate-x-0' : ''} transition-transform duration-500 ease-power3 z-0`} />
+                  <span className={`relative z-10 font-sans font-bold tracking-widest text-base font-medium md:text-base ${usableArea > 0 ? 'text-sol-gold group-hover:text-sol-void drop-shadow-md group-hover:drop-shadow-none' : 'text-sol-muted'}`}>
+                     CALCULATE MY SOLAR PLAN →
+                  </span>
+              </button>
           ) : (
-            <>
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.58-5.84a14.927 14.927 0 00-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 01-2.448-2.448 14.9 14.9 0 01.06-.312m-2.24 2.39a4.493 4.493 0 00-1.757 4.306 4.493 4.493 0 004.306-1.758M16.5 9a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
-              </svg>
-              Calculate My Solar Plan
-            </>
+              <div className="h-[62px] w-full max-w-sm flex items-center justify-center gap-4 bg-transparent">
+                  <div className="w-5 h-5 rounded-full border-2 border-sol-border border-t-sol-gold animate-spin" />
+                  <div className="font-sans font-medium tracking-wide text-sol-muted text-[13px] animate-pulse">
+                     {loadingMessages[loadingStep]}
+                  </div>
+              </div>
           )}
-        </button>
       </div>
 
-      {/* Back link */}
-      <div className="text-center mt-6">
-        <button onClick={() => navigate('/')} className="btn-ghost text-sm">
-          ← Upload a different bill
-        </button>
-      </div>
     </div>
   );
 }

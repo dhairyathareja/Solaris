@@ -2,7 +2,7 @@ services:
   node:
     build: ./api/node
     ports:
-      - "8001:8000"
+      - "8000:8000"
     volumes:
       - ./api/node:/app
     environment:

@@ -43,28 +43,28 @@ router.post('/calculate', async (req, res) => {
   try {
     const reqData = req.body;
     
-    // 1. Geocode address
+    // 1. Geocode address: Convert text address to Lat/Long using OpenStreetMap
     const [lat, lon] = await geocodeAddress(reqData.address);
 
-    // 2. Fetch NASA irradiance data
+    // 2. Fetch NASA irradiance data (GHI): Gets 12-month array of averages for specific coordinate
     const ghiMonthly = await fetchMonthlyGhi(lat, lon);
 
-    // 3. Compute annual consumption
+    // 3. Compute annual consumption: Sum all uploaded monthly electricity bill units
     const annualKwh = reqData.monthly_units.reduce((a, b) => a + b, 0);
     const avgGhi = ghiMonthly.reduce((a, b) => a + b, 0) / ghiMonthly.length;
 
-    // 4. Size the system
+    // 4. Size the system: Calculates kWp rating based on optimal roof sizing formula
     const sizing = sizeSystem(annualKwh, avgGhi);
     const systemKwp = sizing.system_kwp;
 
-    // 5. Compute monthly generation
+    // 5. Compute monthly generation: Applies performance ratios & days-per-month logic to get precise kW output limits
     const monthlyGen = computeMonthlyGeneration(systemKwp, ghiMonthly);
     const annualGen = monthlyGen.reduce((a, b) => a + b, 0);
 
-    // 6. Compute grid offset
+    // 6. Compute grid offset: Evaluate percentage of traditional electricity offset by solar prediction
     const gridOffsetPct = annualKwh > 0 ? (annualGen / annualKwh) * 100 : 0.0;
 
-    // 7. Compute financials
+    // 7. Compute financials & returns: Evaluate costs, Payback Period, Net Present Value, and Internal Rate of Return
     const financials = computeFinancialsBasic(systemKwp, annualGen, reqData.tariff_per_unit);
 
     res.json({

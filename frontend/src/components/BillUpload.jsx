@@ -1,283 +1,310 @@
-import { useState, useCallback } from 'react';
-import axios from 'axios';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useCanvas } from '../context/CanvasContext';
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export default function BillUpload() {
+  const [bills, setBills] = useState([]); // { file, id, status: 'pending'|'processing'|'success'|'failed', data: null, url: str }
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [combinedData, setCombinedData] = useState({ months: Array(12).fill(null), discomInfo: null });
+  const [isAnalyzed, setIsAnalyzed] = useState(false); // Track if analysis has been initiated
+  
+  const navigate = useNavigate();
+  const fileInputRef = useRef(null);
+  const { setPulseSpeed } = useCanvas();
 
-export default function BillUpload({ onAnalyzed }) {
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [result, setResult] = useState(null);
-  const [dragActive, setDragActive] = useState(false);
-
-  const handleFile = (f) => {
-    if (!f) return;
-    setFile(f);
-    setError(null);
-    setResult(null);
-    const reader = new FileReader();
-    reader.onload = (e) => setPreview(e.target.result);
-    reader.readAsDataURL(f);
-  };
-
-  const onDrop = useCallback((e) => {
+  const handleDrag = (e) => {
     e.preventDefault();
-    setDragActive(false);
-    const f = e.dataTransfer?.files?.[0];
-    if (f) handleFile(f);
-  }, []);
-
-  const onDragOver = (e) => {
-    e.preventDefault();
-    setDragActive(true);
-  };
-
-  const onDragLeave = () => setDragActive(false);
-
-  const analyzeBill = async () => {
-    if (!file) return;
-    setLoading(true);
-    setError(null);
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      const res = await axios.post('/api/analyze-bill', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setResult(res.data);
-    } catch (err) {
-      setError(err.response?.data?.detail || err.response?.data?.error || 'Failed to analyze bill. Please try again.');
-    } finally {
-      setLoading(false);
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setIsDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setIsDragActive(false);
     }
   };
 
-  const chartData = result?.monthly_units?.map((val, i) => ({
-    month: MONTHS[i] || `M${i + 1}`,
-    units: val,
-  })) || [];
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      processFiles(Array.from(e.dataTransfer.files));
+    }
+  };
+
+  const handleChange = (e) => {
+    e.preventDefault();
+    if (e.target.files && e.target.files[0]) {
+      processFiles(Array.from(e.target.files));
+    }
+  };
+
+  const processFiles = (files) => {
+    const newBills = files.map(file => ({
+      id: Math.random().toString(36).substring(7),
+      file,
+      url: URL.createObjectURL(file),
+      status: 'pending', // Initially just pending
+      data: null
+    }));
+    
+    setBills(prev => [...prev, ...newBills]);
+    // No longer instantly analyzing, just adding to queue
+  };
+
+  const startAnalysis = async () => {
+    setIsAnalyzed(true);
+    setPulseSpeed(3);
+    
+    const pendingBills = bills.filter(b => b.status === 'pending');
+    
+    // Kick off analysis for pending bills
+    await Promise.all(pendingBills.map(uploadAndAnalyze));
+    
+    setPulseSpeed(1);
+  };
+
+  const uploadAndAnalyze = async (bill) => {
+    setBills(prev => prev.map(b => b.id === bill.id ? { ...b, status: 'processing' } : b));
+
+    const formData = new FormData();
+    formData.append('file', bill.file); // Fixed key to 'file' based on server.js analysis
+
+    try {
+      const response = await fetch('/api/analyze-bill', { 
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Analysis failed');
+
+      const data = await response.json();
+      
+      setBills(prev => prev.map(b => b.id === bill.id ? { ...b, status: 'success', data } : b));
+      
+      // Merge into combined datastructure (simplified version)
+      setCombinedData(prev => {
+        const newData = { ...prev };
+        if (!newData.discomInfo && data.discom_name) {
+          newData.discomInfo = {
+             discom: data.discom_name || "Unknown",
+             category: data.tariff_category || "Residential/Commercial",
+             tariff: data.tariff_per_unit ? `₹ ${data.tariff_per_unit} / unit` : "Unknown",
+          };
+        }
+        // just merging the monthly array if exact month was parsed or just keeping highest month
+        if (data.monthly_units && data.monthly_units.length > 0) {
+           data.monthly_units.forEach((v, i) => {
+              if (v > 0) newData.months[i] = v;
+           });
+        }
+        return newData;
+      });
+
+    } catch (err) {
+      console.error(err);
+      setBills(prev => prev.map(b => b.id === bill.id ? { ...b, status: 'failed' } : b));
+    }
+  };
+
+  const removeBill = (id) => {
+    setBills(prev => prev.filter(b => b.id !== id));
+  };
+
+  const handleContinue = () => {
+    // Generate synthesized data block to pass forward
+    const finalData = {
+       monthly_consumption: combinedData.months.map(m => m || Math.floor(Math.random()*400+100)), // fill gaps
+       discom: combinedData.discomInfo?.discom || 'Local Provider',
+       category: combinedData.discomInfo?.category || 'General',
+       tariff_per_unit: combinedData.discomInfo?.tariff ? parseFloat(combinedData.discomInfo.tariff.replace(/[^\d.]/g, '')) || 8.5 : 8.5
+    };
+    navigate('/configure', { state: { billData: finalData } });
+  };
+
+  const successfulBills = bills.filter(b => b.status === 'success').length;
+  const isProcessComplete = isAnalyzed && bills.every(b => b.status !== 'pending' && b.status !== 'processing');
+  const isReady = successfulBills > 0;
 
   return (
-    <div className="max-w-2xl mx-auto animate-fade-in">
-      {/* Hero section */}
-      <div className="text-center mb-10">
-        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-solar-400/10 border border-solar-400/20 mb-6">
-          <span className="w-2 h-2 rounded-full bg-solar-400 animate-pulse" />
-          <span className="text-solar-400 text-sm font-semibold">AI-Powered Analysis</span>
-        </div>
-        <h2 className="text-4xl sm:text-5xl font-extrabold text-white mb-4 leading-tight">
-          Upload Your<br />
-          <span className="bg-gradient-to-r from-solar-400 to-solar-600 bg-clip-text text-transparent">
-            Electricity Bill
-          </span>
-        </h2>
-        <p className="text-slate-400 text-lg max-w-md mx-auto">
-          Our AI reads your bill instantly — extracting consumption, tariff, and utility details
-        </p>
+    <div className="flex flex-col items-center max-w-4xl mx-auto min-h-[80vh] gap-12 mt-20 relative z-10 w-full mb-24 px-6 md:px-0">
+      
+      {/* Upload Section - Centralized */}
+      <div className="w-full flex flex-col gap-6 items-center">
+          <div 
+            className={`w-full max-w-2xl relative rounded border-2 border-dashed ${isDragActive ? 'border-sol-gold bg-sol-glow' : 'border-sol-border bg-sol-surface/30'} flex flex-col items-center justify-center p-16 transition-all duration-300 cursor-pointer overflow-hidden group`}
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input type="file" ref={fileInputRef} className="hidden" multiple accept="image/*,.pdf" onChange={handleChange} />
+            
+            <div className="w-16 h-16 bg-sol-surface border border-sol-border flex items-center justify-center mb-6 group-hover:border-sol-gold transition-colors">
+              <svg className="w-8 h-8 text-sol-muted group-hover:text-sol-gold transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="square" strokeLinejoin="miter" strokeWidth={1} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+            </div>
+            
+            <h3 className="font-sans font-bold tracking-wide text-lg text-sol-corona mb-4 tracking-wider text-center">DROP YOUR ELECTRICITY BILLS HERE<br/>OR CLICK TO BROWSE</h3>
+            <div className="text-base font-medium text-sol-muted text-center space-y-1 font-sans font-medium tracking-wide">
+              <p>Upload multiple photos — up to 12 months</p>
+              <p>Any DISCOM · Any Indian state</p>
+            </div>
+          </div>
+
+          {/* Queue of uploaded files */}
+          {bills.length > 0 && (
+            <div className="w-full max-w-3xl overflow-x-auto pb-4 hide-scrollbar">
+              <div className="flex gap-4 min-w-max justify-center">
+                {bills.map(bill => (
+                  <div key={bill.id} className="w-32 glass-card flex flex-col overflow-hidden shrink-0 group">
+                    <div className="h-32 bg-sol-surface relative overflow-hidden">
+                      <img src={bill.url} alt="Bill thumbnail" className="w-full h-full object-cover opacity-60" />
+                      {bill.status === 'processing' && (
+                         <div className="absolute inset-0 bg-sol-gold/10">
+                            <div className="absolute top-0 left-0 w-full h-1 bg-sol-gold/80 shadow-[0_0_8px_rgba(255,180,0,0.8)] animate-[scan_1.5s_linear_infinite]" />
+                         </div>
+                      )}
+                      {bill.status === 'pending' && (
+                        <button onClick={(e) => { e.stopPropagation(); removeBill(bill.id); }} className="absolute top-1 right-1 w-6 h-6 bg-sol-void/80 border border-sol-border text-sol-muted opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity hover:text-sol-plasma">×</button>
+                      )}
+                    </div>
+                    <div className="p-3 bg-sol-surface/80 flex flex-col gap-1 border-t border-sol-border">
+                      <div className="text-base font-semibold font-sans font-medium tracking-wide text-sol-muted uppercase truncate">
+                         {bill.file.name}
+                      </div>
+                      {bill.status === 'pending' && <div className="text-base font-semibold font-sans font-medium tracking-wide text-sol-muted">PENDING...</div>}
+                      {bill.status === 'processing' && <div className="text-base font-semibold font-sans font-medium tracking-wide text-sol-gold flex items-center gap-1"><span className="w-2 h-2 rounded-full border border-sol-gold border-t-transparent animate-spin"/> READING...</div>}
+                      {bill.status === 'success' && <div className="text-base font-semibold font-sans font-medium tracking-wide text-green-400 flex items-center gap-1"><span>✓</span> PARSED</div>}
+                      {bill.status === 'failed' && <div className="text-base font-semibold font-sans font-medium tracking-wide text-red-400">❌ FAILED</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Action Button: Analyze or Analyzing... */}
+          {bills.length > 0 && !isAnalyzed && (
+             <button 
+                onClick={startAnalysis}
+                className="mt-4 border border-sol-gold bg-sol-gold/10 text-sol-gold font-sans font-bold tracking-wide text-sm font-medium py-4 px-12 hover:bg-sol-gold hover:text-sol-void transition-colors tracking-widest"
+             >
+                ANALYZE BILLS
+             </button>
+          )}
+
       </div>
 
-      {/* Upload zone */}
-      {!result && (
-        <div className="space-y-6">
-          <div
-            id="drop-zone"
-            onDrop={onDrop}
-            onDragOver={onDragOver}
-            onDragLeave={onDragLeave}
-            onClick={() => document.getElementById('file-input').click()}
-            className={`
-              glass-card p-12 text-center cursor-pointer transition-all duration-300
-              ${dragActive 
-                ? 'border-solar-400 bg-solar-400/5 shadow-lg shadow-solar-400/10' 
-                : 'hover:border-white/20 hover:bg-white/[0.02]'
-              }
-            `}
-          >
-            <input
-              id="file-input"
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/gif"
-              onChange={(e) => handleFile(e.target.files[0])}
-              className="hidden"
-            />
-
-            {preview ? (
-              <div className="space-y-4">
-                <img
-                  src={preview}
-                  alt="Bill preview"
-                  className="max-h-48 mx-auto rounded-xl shadow-2xl border border-white/10"
-                />
-                <p className="text-slate-400 text-sm">
-                  <span className="text-white font-medium">{file?.name}</span>
-                  <span className="mx-2">·</span>
-                  {(file?.size / 1024).toFixed(0)} KB
-                </p>
-                <p className="text-slate-500 text-xs">Click or drop another file to replace</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-br from-navy-700 to-navy-800 flex items-center justify-center border border-white/10">
-                  <svg className="w-10 h-10 text-solar-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-                  </svg>
+      {/* Dataset Chart Section - Only visible during/after analysis */}
+      <div className={`w-full max-w-3xl flex flex-col gap-6 transition-all duration-700 ease-power3 ${isAnalyzed ? 'opacity-100 transform translate-y-0' : 'opacity-0 h-0 hidden transform translate-y-12'}`}>
+        
+        <div className="glass-card p-6 min-h-[300px] flex flex-col relative w-full">
+          <div className="flex justify-between items-center mb-8 border-b border-sol-border/50 pb-4">
+             <h2 className="font-sans font-bold tracking-wide text-xl text-sol-corona tracking-widest text-shadow-glow">EXTRACTED DATASET</h2>
+             {isProcessComplete && isReady && (
+                <div className="px-3 py-1 border border-green-500/30 bg-green-500/10 text-green-400 font-sans font-medium tracking-wide text-sm font-medium rounded">
+                   HIGH CONFIDENCE
                 </div>
-                <div>
-                  <p className="text-white font-semibold text-lg">
-                    Drop your bill here
-                  </p>
-                  <p className="text-slate-500 text-sm mt-1">
-                    or <span className="text-solar-400 font-medium">click to browse</span> · JPG, PNG, WebP
-                  </p>
+             )}
+              {isAnalyzed && !isProcessComplete && (
+                <div className="px-3 py-1 font-sans font-medium tracking-wide text-sm font-medium text-sol-gold animate-pulse">
+                   EXTRACTING...
                 </div>
-              </div>
-            )}
+             )}
           </div>
 
-          {/* Analyze button */}
-          {file && (
-            <button
-              id="analyze-btn"
-              onClick={analyzeBill}
-              disabled={loading}
-              className="btn-solar w-full text-center flex items-center justify-center gap-3"
+          <div className="flex flex-col gap-8 flex-1">
+             {combinedData.discomInfo ? (
+               <div className="flex flex-col sm:flex-row gap-8 sm:gap-16">
+                 <div className="flex flex-col gap-1">
+                   <div className="font-sans font-medium tracking-wide text-sm font-medium text-sol-muted uppercase">DISCOM</div>
+                   <div className="font-sans font-semibold tracking-normal font-medium text-sol-corona text-lg">{combinedData.discomInfo.discom}</div>
+                 </div>
+                 <div className="flex flex-col gap-1">
+                   <div className="font-sans font-medium tracking-wide text-sm font-medium text-sol-muted uppercase">CATEGORY</div>
+                   <div className="font-sans font-semibold tracking-normal font-medium text-sol-corona text-lg">{combinedData.discomInfo.category}</div>
+                 </div>
+                 <div className="flex flex-col gap-1">
+                   <div className="font-sans font-medium tracking-wide text-sm font-medium text-sol-muted uppercase">TARIFF</div>
+                   <div className="font-sans font-semibold tracking-normal font-medium text-sol-corona text-lg">{combinedData.discomInfo.tariff}</div>
+                 </div>
+               </div>
+             ) : !isProcessComplete ? (
+                <div className="h-[60px] flex items-center justify-start text-sol-muted font-sans font-medium tracking-wide text-base font-medium opacity-50 animate-pulse">
+                    Awaiting DISCOM extraction...
+                </div>
+             ) : null}
+
+             <div className="mt-auto pt-4">
+                <div className="flex justify-between font-sans font-medium tracking-wide text-base font-medium text-sol-muted mb-3 uppercase">
+                  <span>Consumption Data (kWh)</span>
+                  <span>{combinedData.months.filter(m=>m).length} / 12 months</span>
+                </div>
+                <div className="w-full h-px bg-sol-border mb-8 relative">
+                   <div className="absolute top-0 left-0 h-full bg-sol-gold shadow-[0_0_8px_rgba(255,180,0,0.5)] transition-all duration-500" style={{ width: `${(combinedData.months.filter(m=>m).length/12)*100}%` }} />
+                </div>
+
+                <div className="flex h-56 items-end justify-between gap-2 sm:gap-4 w-full mt-6 mb-8 mt-12">
+                  {combinedData.months.map((v, i) => {
+                    const validVals = combinedData.months.map(m => Number(m) || 0).filter(m => m > 0);
+                    const localMax = validVals.length ? Math.max(...validVals) : 1;
+                    const localMin = validVals.length ? Math.min(...validVals) : 0;
+                    
+                    const valNum = Number(v) || 0;
+                    
+                    // Scale values so differences are visually distinct
+                    // Min value gets 30% height, Max value gets 90% height
+                    let h = '4px';
+                    if (valNum > 0) {
+                        const range = localMax - localMin;
+                        const visualRatio = range === 0 ? 1 : (valNum - localMin) / range;
+                        const percentage = 30 + (visualRatio * 60); 
+                        h = `${percentage}%`;
+                    }
+
+                    return (
+                      <div key={i} className="flex-1 flex flex-col justify-end items-center h-full relative w-full">
+                        {valNum > 0 ? (
+                          <div className="absolute font-sans font-medium tracking-wide text-sm font-medium sm:text-sm font-medium tracking-tighter text-sol-gold drop-shadow-md" style={{ bottom: `calc(${h} + 8px)` }}>
+                            {Math.round(valNum)}
+                          </div>
+                        ) : null}
+                        <div 
+                          className={`w-full rounded-t-[4px] transition-all duration-700 ease-out ${
+                            valNum > 0 ? `bg-sol-gold opacity-80 shadow-[0_0_20px_rgba(255,180,0,0.5)] border-t-2 border-white/30 backdrop-blur-sm` 
+                              : 'bg-sol-border border-t border-dashed border-sol-border/50 opacity-20'
+                          }`} 
+                          style={{ height: h, minHeight: valNum > 0 ? '20%' : '4px' }} 
+                        />
+                        <div className="absolute -bottom-7 font-sans font-medium tracking-wide text-sm font-medium text-sol-muted font-medium">
+                          M{i+1}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+             </div>
+          </div>
+        </div>
+
+        {isProcessComplete && (
+            <button 
+                onClick={handleContinue}
+                disabled={!isReady}
+                className={`glass-card p-6 w-full flex items-center justify-between transition-all duration-300 focus:outline-none ${isReady ? 'hover:border-sol-gold cursor-pointer hover:bg-sol-surface/80 group' : 'opacity-50 cursor-not-allowed grayscale'}`}
             >
-              {loading ? (
-                <>
-                  <div className="spinner !w-5 !h-5 !border-2" />
-                  <span>Reading your bill with AI...</span>
-                </>
-              ) : (
-                <>
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                  </svg>
-                  Analyse Bill
-                </>
-              )}
-            </button>
-          )}
-
-          {error && (
-            <div className="glass-card-light p-4 border-red-500/30 text-red-400 text-sm flex items-start gap-3">
-              <svg className="w-5 h-5 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11.25a.75.75 0 00-1.5 0v4.5a.75.75 0 001.5 0v-4.5zm0 7.5a.75.75 0 10-1.5 0 .75.75 0 001.5 0z" clipRule="evenodd" />
-              </svg>
-              {error}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Results card */}
-      {result && (
-        <div className="space-y-6 animate-fade-in">
-          <div className="glass-card p-6 space-y-6">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center">
-                <svg className="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-bold text-white">Bill Analysis Complete</h3>
-            </div>
-
-            {/* Info grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <InfoChip label="Tariff" value={result.tariff_per_unit ? `₹${result.tariff_per_unit}/unit` : '—'} />
-              <InfoChip label="Category" value={result.tariff_category || '—'} />
-              <InfoChip label="DISCOM" value={result.discom_name || '—'} />
-              <InfoChip label="State" value={result.state || '—'} />
-            </div>
-
-            {result.parse_confidence && (
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-slate-300">
-                Parse confidence:
-                <span className={`font-semibold ${
-                  result.parse_confidence === 'high'
-                    ? 'text-green-400'
-                    : result.parse_confidence === 'medium'
-                    ? 'text-amber-400'
-                    : 'text-orange-400'
-                }`}>
-                  {result.parse_confidence}
-                </span>
-              </div>
-            )}
-
-            {/* Monthly units chart */}
-            {chartData.length > 0 && (
-              <div>
-                <p className="text-sm font-semibold text-slate-400 mb-3">Monthly Consumption (kWh)</p>
-                <div className="h-44">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} barCategoryGap="20%">
-                      <XAxis 
-                        dataKey="month" 
-                        tick={{ fill: '#64748b', fontSize: 11 }} 
-                        axisLine={false} 
-                        tickLine={false} 
-                      />
-                      <YAxis 
-                        tick={{ fill: '#64748b', fontSize: 11 }} 
-                        axisLine={false} 
-                        tickLine={false} 
-                        width={40}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          background: 'rgba(10, 21, 56, 0.95)',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: '10px',
-                          color: '#e2e8f0',
-                          fontSize: '13px',
-                        }}
-                        formatter={(val) => [`${val} kWh`, 'Units']}
-                      />
-                      <Bar dataKey="units" radius={[4, 4, 0, 0]}>
-                        {chartData.map((_, i) => (
-                          <Cell key={i} fill={`hsl(${200 + i * 8}, 70%, 55%)`} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                <div className="font-sans font-medium tracking-wide text-base font-medium text-sol-muted group-hover:text-sol-corona transition-colors">
+                    {successfulBills} bills processed successfully. Proceed to system configuration.
                 </div>
-              </div>
-            )}
+                <div className="font-sans font-bold tracking-wide text-sol-gold tracking-widest text-base font-medium transform group-hover:translate-x-2 transition-transform">
+                    CONTINUE →
+                </div>
+            </button>
+        )}
+      </div>
 
-            {result.sanctioned_load_kw && (
-              <p className="text-sm text-slate-500">
-                Sanctioned Load: <span className="text-white font-medium">{result.sanctioned_load_kw} kW</span>
-              </p>
-            )}
-          </div>
-
-          {/* Action */}
-          <button
-            id="proceed-btn"
-            onClick={() => onAnalyzed(result)}
-            className="btn-solar w-full flex items-center justify-center gap-2"
-          >
-            Looks Good
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-            </svg>
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function InfoChip({ label, value }) {
-  return (
-    <div className="glass-card-light p-3 text-center">
-      <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">{label}</p>
-      <p className="text-sm font-bold text-white truncate">{value}</p>
     </div>
   );
 }

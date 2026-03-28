@@ -1,12 +1,18 @@
 const axios = require('axios');
 
+/**
+ * Fetches solar irradiance data (GHI - Global Horizontal Irradiance) for the given coordinates 
+ * utilizing the NASA POWER (Prediction of Worldwide Energy Resources) API.
+ * The metric used is ALLSKY_SFC_SW_DWN (All Sky Surface Shortwave Downward Irradiance).
+ * Averages data over multiple years (2015-2023) and processes it into average monthly statistics.
+ */
 async function fetchMonthlyGhi(lat, lon) {
   const url = 'https://power.larc.nasa.gov/api/temporal/monthly/point';
   try {
     const response = await axios.get(url, {
       params: {
-        parameters: 'ALLSKY_SFC_SW_DWN',
-        community: 'RE',
+        parameters: 'ALLSKY_SFC_SW_DWN', // The specific solar energy metric from NASA
+        community: 'RE', // Renewable Energy community validation
         longitude: lon,
         latitude: lat,
         start: 2015,
@@ -26,8 +32,10 @@ async function fetchMonthlyGhi(lat, lon) {
       monthCounts[i] = 0;
     }
 
+    // Process the temporal dataset: group values by month (YYYYMM format from keys)
     for (const [key, value] of Object.entries(ghiData)) {
       if (key.length !== 6 || value < 0) {
+        // Skip invalid data points indicated by negative values (e.g., missing data)
         continue;
       }
 
@@ -38,11 +46,13 @@ async function fetchMonthlyGhi(lat, lon) {
       }
     }
 
+    // Calculate long-term monthly averages
     const monthlyAverages = [];
     for (let m = 1; m <= 12; m++) {
       if (monthCounts[m] > 0) {
         monthlyAverages.push(Math.round((monthSums[m] / monthCounts[m]) * 100) / 100);
       } else {
+        // Fallback: Global average approximation if data is missing for that coordinate
         const allVals = Object.values(ghiData).filter(v => v > 0);
         let avg = 4.5;
         if (allVals.length > 0) {

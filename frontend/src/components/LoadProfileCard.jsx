@@ -14,10 +14,10 @@ export default function LoadProfileCard({ tariffPerUnit, tariffCategory, loadPro
 
   return (
     <div className="glass-card p-6 space-y-4">
-      <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Solar Self-Consumption Analysis</h3>
+      <h3 className="text-base font-medium font-bold uppercase tracking-wider text-slate-400">Solar Self-Consumption Analysis</h3>
 
       <div className="space-y-2">
-        <div className="flex justify-between text-sm text-slate-300">
+        <div className="flex justify-between text-base font-medium text-slate-300">
           <span>Used on-site @ ₹{Number(tariffPerUnit || 0).toFixed(2)}/unit</span>
           <span>{pct(selfRatio)} {'->'} {inr(financial.direct_use_savings)}</span>
         </div>
@@ -27,7 +27,7 @@ export default function LoadProfileCard({ tariffPerUnit, tariffCategory, loadPro
       </div>
 
       <div className="space-y-2">
-        <div className="flex justify-between text-sm text-slate-300">
+        <div className="flex justify-between text-base font-medium text-slate-300">
           <span>Exported to grid @ ₹2.50/unit</span>
           <span>{pct(exportRatio)} {'->'} {inr(financial.export_savings)}</span>
         </div>
@@ -36,7 +36,7 @@ export default function LoadProfileCard({ tariffPerUnit, tariffCategory, loadPro
         </div>
       </div>
 
-      <p className="text-xs text-slate-500">
+      <p className="text-sm font-medium text-slate-500">
         Based on MNRE {String(tariffCategory || loadProfile.tariff_category || 'domestic')} load profile
       </p>
     </div>

@@ -26,6 +26,41 @@ const CATEGORY_KEYWORDS = {
   domestic: ['domestic', 'residential', 'lmv', 'household'],
 };
 
+const MONTH_ALIASES = {
+  jan: 0,
+  january: 0,
+  feb: 1,
+  february: 1,
+  mar: 2,
+  march: 2,
+  apr: 3,
+  april: 3,
+  may: 4,
+  jun: 5,
+  june: 5,
+  jul: 6,
+  july: 6,
+  aug: 7,
+  august: 7,
+  sep: 8,
+  sept: 8,
+  september: 8,
+  oct: 9,
+  october: 9,
+  nov: 10,
+  november: 10,
+  dec: 11,
+  december: 11,
+};
+
+const MONTH_TOKEN_PATTERN = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+
+function monthTokenToIndex(token) {
+  if (!token) return null;
+  const key = String(token).toLowerCase().replace(/[^a-z]/g, '');
+  return Number.isInteger(MONTH_ALIASES[key]) ? MONTH_ALIASES[key] : null;
+}
+
 function toNumber(raw) {
   if (raw == null) return null;
   const normalized = String(raw).replace(/,/g, '');
@@ -47,34 +82,56 @@ function orderedUniqueNumbers(candidates) {
   return values;
 }
 
-function findMonthlyUnits(text) {
-  const matches = [];
+function detectBillingMonthIndex(text) {
   const patterns = [
-    /(?:units consumed|consumption|kWh)\s*[:\-]?\s*(\d{2,5})/gi,
-    /(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s\-:\/]+(\d{2,5})/gi,
-    /(\d{3,5})\s*(?:units|kwh|kw\.h)/gi,
+    new RegExp(`(?:bill(?:ing)?\\s*(?:month|period)|for\\s*month|month)\\s*[:\\-]?\\s*${MONTH_TOKEN_PATTERN}`, 'i'),
+    new RegExp(`(?:from|to)\\s+${MONTH_TOKEN_PATTERN}\\s+\\d{2,4}`, 'i'),
+    new RegExp(`${MONTH_TOKEN_PATTERN}\\s*[-/]\\s*\\d{2,4}`, 'i'),
   ];
 
   for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.exec(text)) !== null) {
-      matches.push(match[1]);
-    }
+    const match = text.match(pattern);
+    if (!match) continue;
+    const idx = monthTokenToIndex(match[1]);
+    if (idx !== null) return idx;
   }
 
-  const block = text.match(/(?:units consumed|consumption|kWh)[\s\S]{0,350}/i);
-  if (block) {
-    const nums = block[0].match(/\b\d{3,5}\b/g) || [];
-    if (nums.length >= 6) {
-      matches.push(...nums.slice(0, 12));
-    }
+  const fallback = text.match(new RegExp(MONTH_TOKEN_PATTERN, 'i'));
+  return fallback ? monthTokenToIndex(fallback[1]) : null;
+}
+
+function findBilledUnits(text) {
+  const patterns = [
+    /(?:units\s*consumed|total\s*units|energy\s*consumed|monthly\s*consumption)\s*[:\-]?\s*([\d,]{2,7}(?:\.\d+)?)/i,
+    /(?:consumption|kwh)\s*[:\-]?\s*([\d,]{2,7}(?:\.\d+)?)/i,
+    /([\d,]{2,7}(?:\.\d+)?)\s*(?:units|kwh|kw\.h)\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match) continue;
+    const value = toNumber(match[1]);
+    if (value !== null && value >= 20 && value <= 20000) return value;
   }
 
-  const parsed = orderedUniqueNumbers(matches)
-    .filter((n) => n >= 100 && n <= 9999)
-    .slice(0, 12);
+  return null;
+}
 
-  return parsed;
+function findMonthlyHistoryMap(text) {
+  const map = Array(12).fill(null);
+  const regex = new RegExp(`${MONTH_TOKEN_PATTERN}[^\\d]{0,14}([\\d,]{2,7}(?:\\.\\d+)?)`, 'gi');
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    const monthIdx = monthTokenToIndex(match[1]);
+    const value = toNumber(match[2]);
+    if (monthIdx === null || value === null) continue;
+    if (value < 20 || value > 20000) continue;
+    map[monthIdx] = value;
+  }
+
+  const detectedCount = map.filter((v) => v != null).length;
+  return detectedCount >= 3 ? map : null;
 }
 
 function findTariff(text) {
@@ -142,18 +199,33 @@ function findState(text) {
 }
 
 function getParseConfidence(parsed) {
-  const monthlyCount = Array.isArray(parsed.monthly_units) ? parsed.monthly_units.length : 0;
-  if (monthlyCount < 3) return 'low';
-
+  const hasUnits = Number.isFinite(Number(parsed.billed_units_kwh));
+  const hasMonth = Number.isInteger(parsed.billing_month_index);
   const hasTariff = parsed.tariff_per_unit != null;
   const hasCategory = parsed.tariff_category != null;
-  if (hasTariff && hasCategory) return 'high';
-  return 'medium';
+
+  if (hasUnits && hasMonth && hasTariff && hasCategory) return 'high';
+  if (hasUnits && hasMonth) return 'medium';
+  if (hasUnits) return 'low';
+  return 'low';
 }
 
 function parseBillText(ocrText) {
+  const monthlyHistoryMap = findMonthlyHistoryMap(ocrText);
+  const billingMonthIndex = detectBillingMonthIndex(ocrText);
+  const billedUnits = findBilledUnits(ocrText);
+
+  let monthlyUnits = [];
+  if (monthlyHistoryMap) {
+    monthlyUnits = monthlyHistoryMap.map((val) => (val == null ? null : Math.round(val * 10) / 10));
+  } else if (billedUnits != null) {
+    monthlyUnits = [Math.round(billedUnits * 10) / 10];
+  }
+
   const parsed = {
-    monthly_units: findMonthlyUnits(ocrText),
+    monthly_units: monthlyUnits,
+    billing_month_index: billingMonthIndex,
+    billed_units_kwh: billedUnits != null ? Math.round(billedUnits * 10) / 10 : null,
     sanctioned_load_kw: findSanctionedLoadKw(ocrText),
     tariff_per_unit: findTariff(ocrText),
     tariff_category: findTariffCategory(ocrText),

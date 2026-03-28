@@ -38,7 +38,7 @@ export default function ForecastChart({ monthlyUnits, forecast, monthlyGen }) {
 
   return (
     <div className="glass-card p-6">
-      <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Generation vs Consumption Forecast</h3>
+      <h3 className="text-base font-medium font-bold uppercase tracking-wider text-slate-400 mb-4">Generation vs Consumption Forecast</h3>
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
@@ -62,7 +62,7 @@ export default function ForecastChart({ monthlyUnits, forecast, monthlyGen }) {
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-      <p className="text-sm text-slate-300 mt-3">{trendLabel(forecast?.trend, forecast?.annual_change_pct)}</p>
+      <p className="text-base font-medium text-slate-300 mt-3">{trendLabel(forecast?.trend, forecast?.annual_change_pct)}</p>
     </div>
   );
 }
