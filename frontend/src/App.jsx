@@ -32,11 +32,15 @@ function App() {
 
   return (
     <CanvasProvider>
-      <Cursor />
-      <SolarCanvas />
+      <div className="no-print">
+        <Cursor />
+      </div>
+      <div className="no-print">
+        <SolarCanvas />
+      </div>
       
       {/* Absolute Header Overlay */}
-      <header className="fixed top-0 left-0 w-full z-[100] px-8 py-6 mix-blend-difference pointer-events-none">
+      <header className="no-print fixed top-0 left-0 w-full z-[100] px-8 py-6 mix-blend-difference pointer-events-none">
         <div className="flex justify-between items-center max-w-screen-2xl mx-auto">
           <div className="pointer-events-auto cursor-pointer" onClick={() => navigate('/')}>
             <span className="font-sans font-bold tracking-wide text-sol-gold tracking-[0.3em] font-bold text-base font-medium">SOLARIS</span>

@@ -10,9 +10,9 @@ const INDIAN_STATES = [
 
 const DISCOMS = {
   BSES: ['bses', 'rajdhani', 'yamuna'],
-  MSEDCL: ['msedcl', 'mahavitaran', 'maharashtra state electricity'],
-  BESCOM: ['bescom', 'bangalore electricity'],
-  TNEB: ['tneb', 'tangedco', 'tamil nadu'],
+  MSEDCL: ['msedcl', 'maha vitaran', 'mahavitaran', 'mahadiscom', 'mseb', 'maharashtra state electricity'],
+  BESCOM: ['bescom', 'bangalore electricity', 'bengaluru electricity'],
+  TNEB: ['tneb', 'tangedco', 'tamil nadu electricity'],
   UPPCL: ['uppcl', 'uttar pradesh power'],
   JVVNL: ['jvvnl', 'jaipur vidyut'],
   TSSPDCL: ['tsspdcl', 'telangana'],
@@ -54,6 +54,7 @@ const MONTH_ALIASES = {
 };
 
 const MONTH_TOKEN_PATTERN = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+const YEAR_TOKEN_PATTERN = "(?:'\\d{2}|(?:19|20)\\d{2}|\\d{2})";
 
 function monthTokenToIndex(token) {
   if (!token) return null;
@@ -63,9 +64,25 @@ function monthTokenToIndex(token) {
 
 function toNumber(raw) {
   if (raw == null) return null;
-  const normalized = String(raw).replace(/,/g, '');
+  let normalized = String(raw).trim().replace(/\s+/g, '');
+  // Handle OCR values with decimal comma (e.g., 8,43) vs thousands comma (e.g., 4,235).
+  if (normalized.includes(',') && !normalized.includes('.')) {
+    if (/^\d{1,2},\d{1,2}$/.test(normalized) || /^\d{3,4},\d{1,2}$/.test(normalized)) {
+      normalized = normalized.replace(',', '.');
+    } else {
+      normalized = normalized.replace(/,/g, '');
+    }
+  } else {
+    normalized = normalized.replace(/,/g, '');
+  }
   const value = Number(normalized);
   return Number.isFinite(value) ? value : null;
+}
+
+function isYearToken(raw) {
+  if (raw == null) return false;
+  const normalized = String(raw).replace(/,/g, '').trim();
+  return /^(19|20)\d{2}$/.test(normalized);
 }
 
 function orderedUniqueNumbers(candidates) {
@@ -82,11 +99,60 @@ function orderedUniqueNumbers(candidates) {
   return values;
 }
 
+function parseMonthIndexFromDateToken(dateToken) {
+  if (!dateToken) return null;
+  const token = String(dateToken).trim();
+
+  const numericMatch = token.match(/^(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{2,4})$/i);
+  if (numericMatch) {
+    const month = Number(numericMatch[2]);
+    if (month >= 1 && month <= 12) return month - 1;
+  }
+
+  const monthTokenMatch = token.match(new RegExp(MONTH_TOKEN_PATTERN, 'i'));
+  if (monthTokenMatch) {
+    return monthTokenToIndex(monthTokenMatch[1]);
+  }
+
+  return null;
+}
+
 function detectBillingMonthIndex(text) {
+  const fromDateRegex = /(?:from\s*date|fromdate)\s*[:\-]?\s*(\d{1,2}\s*[\/\-.]\s*(?:\d{1,2}|[a-z]{3,9})\s*[\/\-.]\s*\d{2,4})/i;
+  const fromDateMatch = text.match(fromDateRegex);
+  if (fromDateMatch) {
+    const idx = parseMonthIndexFromDateToken(fromDateMatch[1]);
+    if (idx !== null) return idx;
+  }
+
+  const periodDateRangeRegex = /(?:bill(?:ing)?\s*period|period)\s*[:\-]?\s*(?:from\s+)?(\d{1,2}\s*[\/\-.]\s*(?:\d{1,2}|[a-z]{3,9})\s*[\/\-.]\s*\d{2,4})\s*(?:to|-|–)\s*(\d{1,2}\s*[\/\-.]\s*(?:\d{1,2}|[a-z]{3,9})\s*[\/\-.]\s*\d{2,4})/i;
+  const periodDateRangeMatch = text.match(periodDateRangeRegex);
+  if (periodDateRangeMatch) {
+    const idx = parseMonthIndexFromDateToken(periodDateRangeMatch[1]);
+    if (idx !== null) return idx;
+  }
+
+  const rangeMatch = text.match(
+    new RegExp(
+      `(?:bill(?:ing)?\\s*period|period)\\s*[:\\-]?\\s*(?:from\\s+)?${MONTH_TOKEN_PATTERN}(?:\\s*[-/'’]?\\s*${YEAR_TOKEN_PATTERN})?\\s*(?:to|-|–)\\s*${MONTH_TOKEN_PATTERN}`,
+      'i',
+    ),
+  );
+  if (rangeMatch) {
+    const startMonth = monthTokenToIndex(rangeMatch[1]);
+    if (startMonth !== null) return startMonth;
+  }
+
+  const fromRegex = new RegExp(`from\\s+${MONTH_TOKEN_PATTERN}(?:\\s*[-/'’]?\\s*${YEAR_TOKEN_PATTERN})?`, 'i');
+  const fromMatch = text.match(fromRegex);
+  if (fromMatch) {
+    const idx = monthTokenToIndex(fromMatch[1]);
+    if (idx !== null) return idx;
+  }
+
   const patterns = [
-    new RegExp(`(?:bill(?:ing)?\\s*(?:month|period)|for\\s*month|month)\\s*[:\\-]?\\s*${MONTH_TOKEN_PATTERN}`, 'i'),
-    new RegExp(`(?:from|to)\\s+${MONTH_TOKEN_PATTERN}\\s+\\d{2,4}`, 'i'),
-    new RegExp(`${MONTH_TOKEN_PATTERN}\\s*[-/]\\s*\\d{2,4}`, 'i'),
+    new RegExp(`(?:bill(?:ing)?\\s*month|for\\s*month|month\\s*of|month)\\s*[:\\-]?\\s*${MONTH_TOKEN_PATTERN}`, 'i'),
+    new RegExp(`${MONTH_TOKEN_PATTERN}\\s*[-/]\\s*${YEAR_TOKEN_PATTERN}`, 'i'),
   ];
 
   for (const pattern of patterns) {
@@ -96,15 +162,30 @@ function detectBillingMonthIndex(text) {
     if (idx !== null) return idx;
   }
 
-  const fallback = text.match(new RegExp(MONTH_TOKEN_PATTERN, 'i'));
-  return fallback ? monthTokenToIndex(fallback[1]) : null;
+  return null;
 }
 
 function findBilledUnits(text) {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const perLinePatterns = [
+    /consumption\s*\(?\s*(?:kwh|kw\.h)\s*\)?\s*[:=\-]?\s*([\d.,]{2,9})/i,
+    /([\d.,]{2,9})\s*(?:kwh|kw\.h)\s*(?:consumption)?/i,
+  ];
+
+  for (const line of lines) {
+    if (!/consumption/i.test(line) || !/(kwh|kw\.h)/i.test(line)) continue;
+    for (const pattern of perLinePatterns) {
+      const match = line.match(pattern);
+      if (!match) continue;
+      const value = toNumber(match[1]);
+      if (value !== null && value >= 20 && value <= 20000) return value;
+    }
+  }
+
   const patterns = [
-    /(?:units\s*consumed|total\s*units|energy\s*consumed|monthly\s*consumption)\s*[:\-]?\s*([\d,]{2,7}(?:\.\d+)?)/i,
-    /(?:consumption|kwh)\s*[:\-]?\s*([\d,]{2,7}(?:\.\d+)?)/i,
-    /([\d,]{2,7}(?:\.\d+)?)\s*(?:units|kwh|kw\.h)\b/i,
+    /consumption\s*\(?\s*(?:kwh|kw\.h)\s*\)?\s*[:=\-]?\s*([\d.,]{2,9})/i,
+    /(?:total\s*)?consumption[^\n]{0,20}(?:kwh|kw\.h)[^\n]{0,16}([\d.,]{2,9})/i,
+    /([\d.,]{2,9})[^\n]{0,16}(?:kwh|kw\.h)[^\n]{0,16}consumption/i,
   ];
 
   for (const pattern of patterns) {
@@ -119,15 +200,56 @@ function findBilledUnits(text) {
 
 function findMonthlyHistoryMap(text) {
   const map = Array(12).fill(null);
-  const regex = new RegExp(`${MONTH_TOKEN_PATTERN}[^\\d]{0,14}([\\d,]{2,7}(?:\\.\\d+)?)`, 'gi');
-  let match;
 
-  while ((match = regex.exec(text)) !== null) {
-    const monthIdx = monthTokenToIndex(match[1]);
-    const value = toNumber(match[2]);
-    if (monthIdx === null || value === null) continue;
-    if (value < 20 || value > 20000) continue;
-    map[monthIdx] = value;
+  const pickUsageValue = (primaryRaw, secondaryRaw = null) => {
+    const candidates = orderedUniqueNumbers([primaryRaw, secondaryRaw]);
+    for (const candidate of candidates) {
+      if (candidate < 20 || candidate > 20000) continue;
+      if (isYearToken(primaryRaw) && secondaryRaw != null && candidate === toNumber(primaryRaw)) continue;
+      return candidate;
+    }
+    return null;
+  };
+
+  const patterns = [
+    {
+      // Captures patterns like: "Jan 2024 356", "Jan: 356", "Jan - 356 units"
+      regex: new RegExp(
+        `${MONTH_TOKEN_PATTERN}(?:\\s*[-/'’]?\\s*(?:19|20)\\d{2})?\\s*[:\\-]?\\s*([\\d.,]{2,9})\\s*(?:units?|kwh|kw\\.h)?`,
+        'gi',
+      ),
+      monthGroup: 1,
+      valueGroups: [2],
+    },
+    {
+      // Captures patterns like: "356 Jan" or "356 kWh Jan"
+      regex: new RegExp(`([\\d.,]{2,9})\\s*(?:units?|kwh|kw\\.h)?[^a-z\\d]{0,8}${MONTH_TOKEN_PATTERN}`, 'gi'),
+      monthGroup: 2,
+      valueGroups: [1],
+    },
+  ];
+
+  for (const pattern of patterns) {
+    // Reverse format "320 Jan" is used as a fallback only when month-first extraction is sparse.
+    if (pattern.monthGroup === 2) {
+      const detected = map.filter((v) => v != null).length;
+      if (detected >= 3) continue;
+    }
+
+    let match;
+    while ((match = pattern.regex.exec(text)) !== null) {
+      const monthIdx = monthTokenToIndex(match[pattern.monthGroup]);
+      if (monthIdx === null) continue;
+
+      const primary = match[pattern.valueGroups[0]];
+      const secondary = pattern.valueGroups.length > 1 ? match[pattern.valueGroups[1]] : null;
+      const value = pickUsageValue(primary, secondary);
+      if (value === null) continue;
+
+      if (map[monthIdx] == null) {
+        map[monthIdx] = value;
+      }
+    }
   }
 
   const detectedCount = map.filter((v) => v != null).length;
@@ -136,10 +258,10 @@ function findMonthlyHistoryMap(text) {
 
 function findTariff(text) {
   const tariffPatterns = [
-    /rate\s*(?:per\s*unit)?\s*[:\-₹]?\s*([\d.]+)/i,
-    /(?:energy\s*charge|unit\s*rate|tariff)\s*[:\-]?\s*₹?\s*([\d.]+)/i,
-    /₹\s*([\d.]+)\s*(?:\/\s*(?:unit|kwh))/i,
-    /rs\.?\s*([\d.]+)\s*(?:\/\s*(?:unit|kwh))/i,
+    /(?:unit\s*rate|rate\s*(?:per\s*unit)?|tariff|rate\s*\/\s*unit)\s*[:=\-₹]?\s*([\d.,]{1,8})/i,
+    /(?:energy\s*charge|ec\b)\s*[:=\-]?\s*₹?\s*([\d.,]{1,8})\s*(?:\/\s*(?:unit|kwh)|per\s*unit)?/i,
+    /₹\s*([\d.,]{1,8})\s*(?:\/\s*(?:unit|kwh)|per\s*unit)/i,
+    /rs\.?\s*([\d.,]{1,8})\s*(?:\/\s*(?:unit|kwh)|per\s*unit)/i,
   ];
 
   for (const pattern of tariffPatterns) {
@@ -169,8 +291,12 @@ function findSanctionedLoadKw(text) {
 
 function findDiscomName(text) {
   const lower = text.toLowerCase();
+  const compact = lower.replace(/[^a-z]/g, '');
   for (const [name, keywords] of Object.entries(DISCOMS)) {
-    if (keywords.some((keyword) => lower.includes(keyword))) {
+    if (keywords.some((keyword) => {
+      const compactKeyword = keyword.toLowerCase().replace(/[^a-z]/g, '');
+      return lower.includes(keyword) || compact.includes(compactKeyword);
+    })) {
       return name;
     }
   }
@@ -211,16 +337,12 @@ function getParseConfidence(parsed) {
 }
 
 function parseBillText(ocrText) {
-  const monthlyHistoryMap = findMonthlyHistoryMap(ocrText);
   const billingMonthIndex = detectBillingMonthIndex(ocrText);
   const billedUnits = findBilledUnits(ocrText);
 
-  let monthlyUnits = [];
-  if (monthlyHistoryMap) {
-    monthlyUnits = monthlyHistoryMap.map((val) => (val == null ? null : Math.round(val * 10) / 10));
-  } else if (billedUnits != null) {
-    monthlyUnits = [Math.round(billedUnits * 10) / 10];
-  }
+  const monthlyUnits = billedUnits != null
+    ? [Math.round(billedUnits * 10) / 10]
+    : [];
 
   const parsed = {
     monthly_units: monthlyUnits,

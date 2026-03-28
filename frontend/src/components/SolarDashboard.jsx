@@ -88,6 +88,21 @@ export default function SolarDashboard() {
       { label: "CO₂ OFFSET", value: `${co2.toLocaleString()} kg/yr`, dot: "bg-emerald-400" },
   ];
 
+   const generatedPointsForReport = reportPoints.length
+      ? reportPoints
+      : [
+         `Recommended system size is ${sysSize} kWp with ${panels} panels based on current load and rooftop constraints.`,
+         `Estimated annual generation is ${Math.round(annualGen).toLocaleString()} kWh with an expected grid offset of ${Number(offset).toFixed(1)}%.`,
+         `Estimated annual savings are ${formatInr(directSavings)} from direct use and ${formatInr(exportSavings)} from exports.`,
+         `Financial outlook indicates a payback period of ${payback} years and 25-year NPV of ${formatInr(npv)}.`,
+      ];
+
+   const printGeneratedAt = new Date().toLocaleString('en-IN');
+
+   const handlePrintReport = () => {
+      window.print();
+   };
+
   const generateReport = async () => {
     setReportLoading(true);
     setReportDone(false);
@@ -113,8 +128,9 @@ export default function SolarDashboard() {
     }
   };
 
-  return (
-    <div className="max-w-[1200px] mx-auto px-6 py-12 relative z-10 min-h-screen flex flex-col">
+   return (
+      <>
+      <div className="max-w-[1200px] mx-auto px-6 py-12 relative z-10 min-h-screen flex flex-col no-print">
        
        <header className="mb-12 flex justify-between items-end border-b border-sol-border pb-6">
            <div>
@@ -258,8 +274,8 @@ export default function SolarDashboard() {
 
            {/* CTA */}
            <div className="col-span-1 md:col-span-2 lg:col-span-3 flex justify-end mt-4 mb-8 relative z-50">
-               <button onClick={() => window.print()} className="border border-sol-gold bg-sol-gold/10 text-sol-gold font-sans font-bold tracking-wide text-sm font-medium py-4 px-8 hover:bg-sol-gold hover:text-sol-void transition-colors flex items-center gap-4 group cursor-pointer z-50">
-                  PRINT FINAL SYSTEM SCHEMATICS
+                      <button onClick={handlePrintReport} className="border border-sol-gold bg-sol-gold/10 text-sol-gold font-sans font-bold tracking-wide text-sm font-medium py-4 px-8 hover:bg-sol-gold hover:text-sol-void transition-colors flex items-center gap-4 group cursor-pointer z-50">
+                           GENERATE STRUCTURED PDF
                   <span className="transform translate-x-0 group-hover:translate-x-2 transition-transform">→</span>
                </button>
            </div>
@@ -267,5 +283,89 @@ export default function SolarDashboard() {
        </div>
 
     </div>
+    
+      <section className="print-only print-report">
+         <div className="print-header">
+            <h1 className="print-title">SOLARIS Executive Feasibility Report</h1>
+            <p className="print-subtitle">Generated: {printGeneratedAt}</p>
+         </div>
+
+         <div className="print-card">
+            <h2 className="print-section-title">System Parameters</h2>
+            <div className="print-kpi-grid">
+               {kpis.map((kpi) => (
+                  <div key={kpi.label} className="print-kpi-item">
+                     <div className="print-muted">{kpi.label}</div>
+                     <div>{kpi.value}</div>
+                  </div>
+               ))}
+            </div>
+         </div>
+
+         <div className="print-card">
+            <h2 className="print-section-title">Generation vs Consumption Forecast</h2>
+
+            <table className="print-table">
+               <thead>
+                  <tr>
+                     <th>Month</th>
+                     <th>Consumption (kWh)</th>
+                     <th>Forecast (kWh)</th>
+                     <th>Generation (kWh)</th>
+                  </tr>
+               </thead>
+               <tbody>
+                  {genVsConsData.map((row) => (
+                     <tr key={row.month}>
+                        <td>{row.month}</td>
+                        <td>{row.consumption}</td>
+                        <td>{row.forecast}</td>
+                        <td>{row.generation}</td>
+                     </tr>
+                  ))}
+               </tbody>
+            </table>
+         </div>
+
+         <div className="print-card financial-card">
+            <h2 className="print-section-title">Financial Summary</h2>
+            <div className="print-kpi-grid">
+               <div className="print-kpi-item">
+                  <div className="print-muted">Tariff</div>
+                  <div>₹{Number(tariffPerUnit).toFixed(2)} / unit</div>
+               </div>
+               <div className="print-kpi-item">
+                  <div className="print-muted">Tariff Category</div>
+                  <div>{String(tariffCategory).toUpperCase()}</div>
+               </div>
+               <div className="print-kpi-item">
+                  <div className="print-muted">Direct Savings</div>
+                  <div>{formatInr(directSavings)}</div>
+               </div>
+               <div className="print-kpi-item">
+                  <div className="print-muted">Export Savings</div>
+                  <div>{formatInr(exportSavings)}</div>
+               </div>
+               <div className="print-kpi-item">
+                  <div className="print-muted">Payback Period</div>
+                  <div>{payback} years</div>
+               </div>
+               <div className="print-kpi-item">
+                  <div className="print-muted">25-Year NPV</div>
+                  <div>{formatInr(npv)}</div>
+               </div>
+            </div>
+         </div>
+
+         <div className="print-card advisory-card">
+            <h2 className="print-section-title">Generated Advisory Points</h2>
+            <ol className="print-insights">
+               {generatedPointsForReport.map((point, idx) => (
+                  <li key={`${idx}-${point.slice(0, 24)}`}>{point}</li>
+               ))}
+            </ol>
+         </div>
+      </section>
+      </>
   );
 }

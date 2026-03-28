@@ -5,7 +5,12 @@ import { useCanvas } from '../context/CanvasContext';
 export default function BillUpload() {
   const [bills, setBills] = useState([]); // { file, id, status: 'pending'|'processing'|'success'|'failed', data: null, url: str }
   const [isDragActive, setIsDragActive] = useState(false);
-  const [combinedData, setCombinedData] = useState({ months: Array(12).fill(null), discomInfo: null });
+  const [combinedData, setCombinedData] = useState({
+    months: Array(12).fill(null),
+    discomInfo: null,
+    parseConfidence: null,
+    sessionId: null,
+  });
   const [isAnalyzed, setIsAnalyzed] = useState(false); // Track if analysis has been initiated
   
   const navigate = useNavigate();
@@ -54,23 +59,21 @@ export default function BillUpload() {
   const startAnalysis = async () => {
     setIsAnalyzed(true);
     setPulseSpeed(3);
-    
-    const pendingBills = bills.filter(b => b.status === 'pending');
-    
-    // Kick off analysis for pending bills
-    await Promise.all(pendingBills.map(uploadAndAnalyze));
-    
-    setPulseSpeed(1);
-  };
 
-  const uploadAndAnalyze = async (bill) => {
-    setBills(prev => prev.map(b => b.id === bill.id ? { ...b, status: 'processing' } : b));
+    const pendingBills = bills.filter((b) => b.status === 'pending');
+    if (!pendingBills.length) {
+      setPulseSpeed(1);
+      return;
+    }
+
+    const pendingIds = new Set(pendingBills.map((b) => b.id));
+    setBills((prev) => prev.map((b) => (pendingIds.has(b.id) ? { ...b, status: 'processing' } : b)));
 
     const formData = new FormData();
-    formData.append('file', bill.file); // Fixed key to 'file' based on server.js analysis
+    pendingBills.forEach((bill) => formData.append('files', bill.file));
 
     try {
-      const response = await fetch('/api/analyze-bill', { 
+      const response = await fetch('/api/analyze-bill', {
         method: 'POST',
         body: formData,
       });
@@ -78,31 +81,31 @@ export default function BillUpload() {
       if (!response.ok) throw new Error('Analysis failed');
 
       const data = await response.json();
-      
-      setBills(prev => prev.map(b => b.id === bill.id ? { ...b, status: 'success', data } : b));
-      
-      // Merge into combined datastructure (simplified version)
-      setCombinedData(prev => {
-        const newData = { ...prev };
-        if (!newData.discomInfo && data.discom_name) {
-          newData.discomInfo = {
-             discom: data.discom_name || "Unknown",
-             category: data.tariff_category || "Residential/Commercial",
-             tariff: data.tariff_per_unit ? `₹ ${data.tariff_per_unit} / unit` : "Unknown",
-          };
-        }
-        // just merging the monthly array if exact month was parsed or just keeping highest month
-        if (data.monthly_units && data.monthly_units.length > 0) {
-           data.monthly_units.forEach((v, i) => {
-              if (v > 0) newData.months[i] = v;
-           });
-        }
-        return newData;
-      });
+      const monthlyUnits = Array.isArray(data.monthly_units) && data.monthly_units.length === 12
+        ? data.monthly_units.map((val) => {
+          const num = Number(val);
+          return Number.isFinite(num) && num > 0 ? num : null;
+        })
+        : Array(12).fill(null);
 
+      setBills((prev) => prev.map((b) => (pendingIds.has(b.id) ? { ...b, status: 'success', data } : b)));
+      setCombinedData({
+        months: monthlyUnits,
+        discomInfo: {
+          discom: data.discom_name || 'Unknown',
+          category: data.tariff_category || 'General',
+          tariffPerUnit: data.tariff_per_unit != null && Number.isFinite(Number(data.tariff_per_unit)) && Number(data.tariff_per_unit) > 0
+            ? Number(data.tariff_per_unit)
+            : null,
+        },
+        parseConfidence: data.parse_confidence || null,
+        sessionId: data.session_id || null,
+      });
     } catch (err) {
       console.error(err);
-      setBills(prev => prev.map(b => b.id === bill.id ? { ...b, status: 'failed' } : b));
+      setBills((prev) => prev.map((b) => (pendingIds.has(b.id) ? { ...b, status: 'failed' } : b)));
+    } finally {
+      setPulseSpeed(1);
     }
   };
 
@@ -111,19 +114,39 @@ export default function BillUpload() {
   };
 
   const handleContinue = () => {
-    // Generate synthesized data block to pass forward
+    const knownValues = combinedData.months
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const fallback = knownValues.length
+      ? knownValues.reduce((sum, value) => sum + value, 0) / knownValues.length
+      : 250;
+
+    const monthlyConsumption = combinedData.months.map((value) => {
+      const num = Number(value);
+      return Number.isFinite(num) && num > 0 ? num : Math.round(fallback * 10) / 10;
+    });
+
     const finalData = {
-       monthly_consumption: combinedData.months.map(m => m || Math.floor(Math.random()*400+100)), // fill gaps
+       monthly_consumption: monthlyConsumption,
        discom: combinedData.discomInfo?.discom || 'Local Provider',
        category: combinedData.discomInfo?.category || 'General',
-       tariff_per_unit: combinedData.discomInfo?.tariff ? parseFloat(combinedData.discomInfo.tariff.replace(/[^\d.]/g, '')) || 8.5 : 8.5
+       tariff_per_unit: combinedData.discomInfo?.tariffPerUnit && combinedData.discomInfo.tariffPerUnit > 0
+        ? combinedData.discomInfo.tariffPerUnit
+        : 8.5
     };
     navigate('/configure', { state: { billData: finalData } });
   };
 
   const successfulBills = bills.filter(b => b.status === 'success').length;
   const isProcessComplete = isAnalyzed && bills.every(b => b.status !== 'pending' && b.status !== 'processing');
-  const isReady = successfulBills > 0;
+  const detectedMonthCount = combinedData.months.filter((value) => Number.isFinite(Number(value)) && Number(value) > 0).length;
+  const isReady = successfulBills > 0 && detectedMonthCount > 0;
+  const confidenceLabel = (combinedData.parseConfidence || (detectedMonthCount >= 6 ? 'high' : detectedMonthCount >= 3 ? 'medium' : 'low')).toUpperCase();
+  const confidenceClass = confidenceLabel === 'HIGH'
+    ? 'border-green-500/30 bg-green-500/10 text-green-400'
+    : confidenceLabel === 'MEDIUM'
+      ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-300'
+      : 'border-red-500/30 bg-red-500/10 text-red-300';
 
   return (
     <div className="flex flex-col items-center max-w-4xl mx-auto min-h-[80vh] gap-12 mt-20 relative z-10 w-full mb-24 px-6 md:px-0">
@@ -204,8 +227,8 @@ export default function BillUpload() {
           <div className="flex justify-between items-center mb-8 border-b border-sol-border/50 pb-4">
              <h2 className="font-sans font-bold tracking-wide text-xl text-sol-corona tracking-widest text-shadow-glow">EXTRACTED DATASET</h2>
              {isProcessComplete && isReady && (
-                <div className="px-3 py-1 border border-green-500/30 bg-green-500/10 text-green-400 font-sans font-medium tracking-wide text-sm font-medium rounded">
-                   HIGH CONFIDENCE
+               <div className={`px-3 py-1 border font-sans font-medium tracking-wide text-sm rounded ${confidenceClass}`}>
+                 {confidenceLabel} CONFIDENCE
                 </div>
              )}
               {isAnalyzed && !isProcessComplete && (
@@ -228,7 +251,11 @@ export default function BillUpload() {
                  </div>
                  <div className="flex flex-col gap-1">
                    <div className="font-sans font-medium tracking-wide text-sm font-medium text-sol-muted uppercase">TARIFF</div>
-                   <div className="font-sans font-semibold tracking-normal font-medium text-sol-corona text-lg">{combinedData.discomInfo.tariff}</div>
+                   <div className="font-sans font-semibold tracking-normal font-medium text-sol-corona text-lg">
+                     {combinedData.discomInfo.tariffPerUnit != null
+                       ? `₹ ${combinedData.discomInfo.tariffPerUnit.toFixed(2)} / unit`
+                       : 'Unknown'}
+                   </div>
                  </div>
                </div>
              ) : !isProcessComplete ? (
@@ -240,10 +267,10 @@ export default function BillUpload() {
              <div className="mt-auto pt-4">
                 <div className="flex justify-between font-sans font-medium tracking-wide text-base font-medium text-sol-muted mb-3 uppercase">
                   <span>Consumption Data (kWh)</span>
-                  <span>{combinedData.months.filter(m=>m).length} / 12 months</span>
+                  <span>{detectedMonthCount} / 12 months</span>
                 </div>
                 <div className="w-full h-px bg-sol-border mb-8 relative">
-                   <div className="absolute top-0 left-0 h-full bg-sol-gold shadow-[0_0_8px_rgba(255,180,0,0.5)] transition-all duration-500" style={{ width: `${(combinedData.months.filter(m=>m).length/12)*100}%` }} />
+                   <div className="absolute top-0 left-0 h-full bg-sol-gold shadow-[0_0_8px_rgba(255,180,0,0.5)] transition-all duration-500" style={{ width: `${(detectedMonthCount/12)*100}%` }} />
                 </div>
 
                 <div className="flex h-56 items-end justify-between gap-2 sm:gap-4 w-full mt-6 mb-8 mt-12">

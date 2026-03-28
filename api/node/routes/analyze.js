@@ -18,6 +18,20 @@ const DAYS_PER_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://localhost:5000';
 const NET_METERING_RATE = 2.5;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_ALIAS_TO_INDEX = {
+  jan: 0, january: 0,
+  feb: 1, february: 1,
+  mar: 2, march: 2,
+  apr: 3, april: 3,
+  may: 4,
+  jun: 5, june: 5,
+  jul: 6, july: 6,
+  aug: 7, august: 7,
+  sep: 8, sept: 8, september: 8,
+  oct: 9, october: 9,
+  nov: 10, november: 10,
+  dec: 11, december: 11,
+};
 
 function errorJson(error, detail) {
   return { error, detail };
@@ -61,8 +75,45 @@ function pickFirst(values) {
   return values.length ? values[0] : null;
 }
 
+function detectMonthFromFilename(fileName) {
+  if (!fileName) return null;
+  const value = String(fileName).toLowerCase();
+
+  const textMonthMatch = value.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i);
+  if (textMonthMatch) {
+    const token = textMonthMatch[1].toLowerCase();
+    if (Number.isInteger(MONTH_ALIAS_TO_INDEX[token])) return MONTH_ALIAS_TO_INDEX[token];
+  }
+
+  const mmYyyyMatch = value.match(/\b(0?[1-9]|1[0-2])[-_./](?:19|20)?\d{2}\b/);
+  if (mmYyyyMatch) return Number(mmYyyyMatch[1]) - 1;
+
+  const yyyyMmMatch = value.match(/\b(?:19|20)\d{2}[-_./](0?[1-9]|1[0-2])\b/);
+  if (yyyyMmMatch) return Number(yyyyMmMatch[1]) - 1;
+
+  return null;
+}
+
 function estimateMonthlyUnits(monthValues) {
-  const detectedCount = monthValues.filter((v) => v != null).length;
+  const numericValues = monthValues.map((value) => {
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0 ? num : null;
+  });
+
+  let cleanedValues = [...numericValues];
+  const detectedBeforeFilter = cleanedValues.filter((v) => v != null).length;
+  if (detectedBeforeFilter >= 3) {
+    const known = cleanedValues.filter((v) => v != null);
+    const med = median(known);
+    const minAllowed = Math.max(20, med * 0.35);
+    const maxAllowed = med * 2.5;
+    cleanedValues = cleanedValues.map((value) => {
+      if (value == null) return null;
+      return value >= minAllowed && value <= maxAllowed ? value : null;
+    });
+  }
+
+  const detectedCount = cleanedValues.filter((v) => v != null).length;
   if (detectedCount === 0) {
     return {
       monthly_units: [],
@@ -71,11 +122,11 @@ function estimateMonthlyUnits(monthValues) {
     };
   }
 
-  const known = monthValues.filter((v) => v != null);
+  const known = cleanedValues.filter((v) => v != null);
   const avg = known.reduce((a, b) => a + b, 0) / known.length;
   const seasonalFactors = [0.96, 0.95, 0.98, 1.02, 1.08, 1.12, 1.1, 1.06, 1.01, 0.99, 0.96, 0.94];
 
-  const monthlyUnits = monthValues.map((value, idx) => {
+  const monthlyUnits = cleanedValues.map((value, idx) => {
     if (value != null) return round1(value);
     return round1(avg * seasonalFactors[idx]);
   });
@@ -230,13 +281,18 @@ router.post('/analyze-bill', upload.any(), async (req, res) => {
       const text = await extractTextFromImage(file.buffer);
       const parsed = parseBillText(text);
 
-      const monthIdx = Number.isInteger(parsed.billing_month_index) ? parsed.billing_month_index : null;
+      const parsedMonthIdx = Number.isInteger(parsed.billing_month_index) ? parsed.billing_month_index : null;
+      const fileNameMonthIdx = detectMonthFromFilename(file.originalname);
+      const monthIdx = parsedMonthIdx != null
+        ? parsedMonthIdx
+        : fileNameMonthIdx;
       const monthLabel = monthIdx != null ? MONTHS[monthIdx] : null;
       const billedUnits = Number.isFinite(Number(parsed.billed_units_kwh)) ? Number(parsed.billed_units_kwh) : null;
 
       extractedMonths.push({
         file_name: file.originalname,
         billing_month: monthLabel,
+        month_source: parsedMonthIdx != null ? 'ocr' : fileNameMonthIdx != null ? 'filename' : null,
         units_kwh: billedUnits,
       });
 
@@ -265,7 +321,12 @@ router.post('/analyze-bill', upload.any(), async (req, res) => {
           if (monthValues[monthIdx] == null) {
             monthValues[monthIdx] = billedUnits;
           } else {
-            monthValues[monthIdx] = round1((monthValues[monthIdx] + billedUnits) / 2);
+            const current = Number(monthValues[monthIdx]);
+            const deltaRatio = current > 0 ? Math.abs(current - billedUnits) / current : 0;
+            // Only blend when values are close; keep existing if new OCR read looks like an outlier.
+            if (deltaRatio <= 0.15) {
+              monthValues[monthIdx] = round1((current + billedUnits) / 2);
+            }
           }
         } else {
           unassignedUnits.push(billedUnits);
