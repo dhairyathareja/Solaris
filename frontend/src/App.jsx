@@ -11,12 +11,12 @@ function App() {
 
   const handleBillAnalyzed = (data) => {
     setBillData(data);
-    navigate('/configure');
+    navigate('/configure', { state: { billData: data } });
   };
 
   const handleCalculated = (result) => {
     setCalcResult(result);
-    navigate('/results');
+    navigate('/results', { state: { result } });
   };
 
   const handleRestart = () => {

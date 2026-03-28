@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Legend, Cell,
@@ -18,12 +18,14 @@ function formatInr(val) {
 
 export default function SolarDashboard({ result, onRestart }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const effectiveResult = result || location.state?.result;
 
   useEffect(() => {
-    if (!result) navigate('/');
-  }, [result, navigate]);
+    if (!effectiveResult) navigate('/');
+  }, [effectiveResult, navigate]);
 
-  if (!result) return null;
+  if (!effectiveResult) return null;
 
   const {
     sizing,
@@ -34,7 +36,7 @@ export default function SolarDashboard({ result, onRestart }) {
     annual_consumption_kwh,
     grid_offset_pct,
     ghi_monthly,
-  } = result;
+  } = effectiveResult;
 
   // Build chart data
   const genVsConsData = MONTHS.map((month, i) => ({
@@ -127,9 +129,9 @@ export default function SolarDashboard({ result, onRestart }) {
             Solar Report
           </span>
         </h2>
-        {result.location?.address && (
+        {effectiveResult.location?.address && (
           <p className="text-slate-400 text-sm">
-            📍 {result.location.address} ({result.location.lat.toFixed(3)}, {result.location.lon.toFixed(3)})
+            📍 {effectiveResult.location.address} ({effectiveResult.location.lat.toFixed(3)}, {effectiveResult.location.lon.toFixed(3)})
           </p>
         )}
       </div>

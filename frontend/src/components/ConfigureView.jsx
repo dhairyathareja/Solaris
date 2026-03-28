@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 const PROGRESS_MESSAGES = [
@@ -11,6 +11,8 @@ const PROGRESS_MESSAGES = [
 
 export default function ConfigureView({ billData, onCalculated }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const effectiveBillData = billData || location.state?.billData;
   const [address, setAddress] = useState('');
   const [rooftopSqm, setRooftopSqm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,10 +21,10 @@ export default function ConfigureView({ billData, onCalculated }) {
 
   // If no bill data, redirect to upload
   useEffect(() => {
-    if (!billData) {
+    if (!effectiveBillData) {
       navigate('/');
     }
-  }, [billData, navigate]);
+  }, [effectiveBillData, navigate]);
 
   // Cycle progress messages while loading
   useEffect(() => {
@@ -37,10 +39,10 @@ export default function ConfigureView({ billData, onCalculated }) {
     return () => clearInterval(interval);
   }, [loading]);
 
-  if (!billData) return null;
+  if (!effectiveBillData) return null;
 
   // Pad monthly_units to 12 if needed
-  const monthlyUnits = [...(billData.monthly_units || [])];
+  const monthlyUnits = [...(effectiveBillData.monthly_units || [])];
   while (monthlyUnits.length < 12) {
     const avg = monthlyUnits.length > 0
       ? monthlyUnits.reduce((a, b) => a + b, 0) / monthlyUnits.length
@@ -66,8 +68,8 @@ export default function ConfigureView({ billData, onCalculated }) {
     try {
       const payload = {
         monthly_units: monthlyUnits,
-        tariff_per_unit: billData.tariff_per_unit || 8.0,
-        tariff_category: billData.tariff_category || 'domestic',
+        tariff_per_unit: effectiveBillData.tariff_per_unit || 8.0,
+        tariff_category: effectiveBillData.tariff_category || 'domestic',
         address: address.trim(),
         rooftop_sqm: parseFloat(rooftopSqm),
       };
@@ -108,23 +110,23 @@ export default function ConfigureView({ billData, onCalculated }) {
               <p className="text-xs text-slate-500 font-medium">Bill Summary</p>
               <p className="text-sm text-white font-semibold">
                 {annualKwh.toLocaleString()} kWh/year
-                {billData.tariff_per_unit && (
+                {effectiveBillData.tariff_per_unit && (
                   <span className="text-slate-400 font-normal ml-2">
-                    @ ₹{billData.tariff_per_unit}/unit
+                    @ ₹{effectiveBillData.tariff_per_unit}/unit
                   </span>
                 )}
               </p>
             </div>
           </div>
           <div className="flex gap-2">
-            {billData.tariff_category && (
+            {effectiveBillData.tariff_category && (
               <span className="px-2 py-1 text-[10px] uppercase font-bold tracking-wider rounded-full bg-solar-400/10 text-solar-400 border border-solar-400/20">
-                {billData.tariff_category}
+                {effectiveBillData.tariff_category}
               </span>
             )}
-            {billData.discom_name && (
+            {effectiveBillData.discom_name && (
               <span className="px-2 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-400 rounded-full bg-white/5 border border-white/10">
-                {billData.discom_name}
+                {effectiveBillData.discom_name}
               </span>
             )}
           </div>
@@ -141,7 +143,7 @@ export default function ConfigureView({ billData, onCalculated }) {
             id="address-input"
             type="text"
             className="input-field"
-            placeholder="e.g. IIT Delhi, Hauz Khas, New Delhi"
+            placeholder="Building address, City, State"
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             disabled={loading}
