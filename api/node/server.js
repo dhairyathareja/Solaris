@@ -7,8 +7,20 @@ const { connectDb } = require('./services/db');
 const app = express();
 const PORT = Number(process.env.PORT || 8000);
 
+const configuredOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://43.205.98.214,https://43.205.98.214')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+
+app.set('trust proxy', 1);
+
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin(origin, callback) {
+    // Allow non-browser tools and internal reverse-proxy requests without Origin header.
+    if (!origin) return callback(null, true);
+    if (configuredOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: '5mb' }));

@@ -1,24 +1,29 @@
 services:
   node:
     build: ./api/node
-    ports:
-      - "8000:8000"
+    restart: unless-stopped
     environment:
-      - PYTHON_SERVICE_URL=http://python:5000
-      - MONGODB_URI=mongodb://mongo:27017/solaris
+      - PYTHON_SERVICE_URL=${PYTHON_SERVICE_URL:-http://python:5000}
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongo:27017/solaris}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://43.205.98.214,https://43.205.98.214}
+      - PORT=8000
+    expose:
+      - "8000"
     depends_on:
       - mongo
       - python
 
   python:
     build: ./api/python
-    ports:
-      - "5000:5000"
+    restart: unless-stopped
+    expose:
+      - "5000"
 
   mongo:
     image: mongo:7
-    ports:
-      - "27017:27017"
+    restart: unless-stopped
+    expose:
+      - "27017"
     volumes:
       - mongo_data:/data/db
 
@@ -26,9 +31,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
+    restart: unless-stopped
 
   nginx:
     image: nginx:alpine
+    restart: unless-stopped
     ports:
       - "80:80"
     volumes:
