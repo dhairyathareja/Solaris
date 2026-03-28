@@ -1,27 +1,52 @@
 import { useState } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import BillUpload from './components/BillUpload';
+import RooftopEstimator from './components/RooftopEstimator';
 import ConfigureView from './components/ConfigureView';
 import SolarDashboard from './components/SolarDashboard';
+import DemoSwitcher from './components/DemoSwitcher';
 
 function App() {
   const [billData, setBillData] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
+  const [rooftopInput, setRooftopInput] = useState(null);
   const [calcResult, setCalcResult] = useState(null);
+  const [activeDemoId, setActiveDemoId] = useState(null);
   const navigate = useNavigate();
 
   const handleBillAnalyzed = (data) => {
-    setBillData(data);
-    navigate('/configure', { state: { billData: data } });
+    const { session_id: session, ...rest } = data || {};
+    setBillData(rest);
+    setSessionId(session || null);
+    setRooftopInput(null);
+    navigate('/rooftop', { state: { billData: rest, sessionId: session } });
+  };
+
+  const handleRooftopEstimated = (data) => {
+    setRooftopInput(data);
+    navigate('/configure', { state: { billData, rooftopInput: data, sessionId } });
   };
 
   const handleCalculated = (result) => {
     setCalcResult(result);
+    setActiveDemoId(null);
+    navigate('/results', { state: { result } });
+  };
+
+  const handleDemoLoaded = (result) => {
+    setCalcResult(result);
+    setBillData(null);
+    setRooftopInput(null);
+    setSessionId(result.session_id || null);
     navigate('/results', { state: { result } });
   };
 
   const handleRestart = () => {
     setBillData(null);
+    setSessionId(null);
+    setRooftopInput(null);
     setCalcResult(null);
+    setActiveDemoId(null);
     navigate('/');
   };
 
@@ -58,7 +83,9 @@ function App() {
           <div className="hidden sm:flex items-center gap-2">
             <StepDot label="Upload" active={!billData} />
             <StepLine />
-            <StepDot label="Configure" active={billData && !calcResult} />
+            <StepDot label="Rooftop" active={billData && !rooftopInput && !calcResult} />
+            <StepLine />
+            <StepDot label="Configure" active={billData && rooftopInput && !calcResult} />
             <StepLine />
             <StepDot label="Results" active={!!calcResult} />
           </div>
@@ -67,9 +94,17 @@ function App() {
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
+        <DemoSwitcher onDemoLoaded={handleDemoLoaded} activeDemoId={activeDemoId} setActiveDemoId={setActiveDemoId} />
         <Routes>
           <Route path="/" element={<BillUpload onAnalyzed={handleBillAnalyzed} />} />
-          <Route path="/configure" element={<ConfigureView billData={billData} onCalculated={handleCalculated} />} />
+          <Route
+            path="/rooftop"
+            element={<RooftopEstimator sessionId={sessionId} initialValue={rooftopInput?.rooftop_sqm} onEstimated={handleRooftopEstimated} />}
+          />
+          <Route
+            path="/configure"
+            element={<ConfigureView billData={billData} rooftopInput={rooftopInput} sessionId={sessionId} onCalculated={handleCalculated} />}
+          />
           <Route path="/results" element={<SolarDashboard result={calcResult} onRestart={handleRestart} />} />
         </Routes>
       </main>

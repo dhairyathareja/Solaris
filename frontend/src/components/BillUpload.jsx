@@ -50,7 +50,7 @@ export default function BillUpload({ onAnalyzed }) {
       });
       setResult(res.data);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to analyze bill. Please try again.');
+      setError(err.response?.data?.detail || err.response?.data?.error || 'Failed to analyze bill. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -193,6 +193,21 @@ export default function BillUpload({ onAnalyzed }) {
               <InfoChip label="DISCOM" value={result.discom_name || '—'} />
               <InfoChip label="State" value={result.state || '—'} />
             </div>
+
+            {result.parse_confidence && (
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-slate-300">
+                Parse confidence:
+                <span className={`font-semibold ${
+                  result.parse_confidence === 'high'
+                    ? 'text-green-400'
+                    : result.parse_confidence === 'medium'
+                    ? 'text-amber-400'
+                    : 'text-orange-400'
+                }`}>
+                  {result.parse_confidence}
+                </span>
+              </div>
+            )}
 
             {/* Monthly units chart */}
             {chartData.length > 0 && (

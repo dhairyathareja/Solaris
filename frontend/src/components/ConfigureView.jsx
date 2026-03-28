@@ -9,12 +9,14 @@ const PROGRESS_MESSAGES = [
   { text: 'Crunching the financials...', icon: '💰' },
 ];
 
-export default function ConfigureView({ billData, onCalculated }) {
+export default function ConfigureView({ billData, rooftopInput, sessionId, onCalculated }) {
   const navigate = useNavigate();
   const location = useLocation();
   const effectiveBillData = billData || location.state?.billData;
+  const effectiveRooftopInput = rooftopInput || location.state?.rooftopInput;
+  const effectiveSessionId = sessionId || location.state?.sessionId;
   const [address, setAddress] = useState('');
-  const [rooftopSqm, setRooftopSqm] = useState('');
+  const [rooftopSqm, setRooftopSqm] = useState(effectiveRooftopInput?.rooftop_sqm ? String(effectiveRooftopInput.rooftop_sqm) : '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [progressIdx, setProgressIdx] = useState(0);
@@ -67,17 +69,22 @@ export default function ConfigureView({ billData, onCalculated }) {
 
     try {
       const payload = {
+        session_id: effectiveSessionId || undefined,
         monthly_units: monthlyUnits,
         tariff_per_unit: effectiveBillData.tariff_per_unit || 8.0,
         tariff_category: effectiveBillData.tariff_category || 'domestic',
+        discom_name: effectiveBillData.discom_name || null,
+        state: effectiveBillData.state || null,
+        sanctioned_load_kw: effectiveBillData.sanctioned_load_kw || null,
         address: address.trim(),
         rooftop_sqm: parseFloat(rooftopSqm),
+        estimation_method: effectiveRooftopInput?.estimation_method || 'direct',
       };
 
       const res = await axios.post('/api/calculate', payload);
       onCalculated(res.data);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Calculation failed. Please check your inputs.');
+      setError(err.response?.data?.detail || err.response?.data?.error || 'Calculation failed. Please check your inputs.');
     } finally {
       setLoading(false);
     }

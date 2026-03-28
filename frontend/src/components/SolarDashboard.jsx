@@ -1,11 +1,9 @@
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Legend, Cell,
-} from 'recharts';
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+import ForecastChart from './ForecastChart';
+import RooftopWarningBanner from './RooftopWarningBanner';
+import LoadProfileCard from './LoadProfileCard';
+import ReportDisplay from './ReportDisplay';
 
 function formatInr(val) {
   if (val == null) return '—';
@@ -28,44 +26,34 @@ export default function SolarDashboard({ result, onRestart }) {
   if (!effectiveResult) return null;
 
   const {
-    sizing,
-    financials,
-    monthly_generation_kwh,
-    monthly_consumption_kwh,
-    annual_generation_kwh,
-    annual_consumption_kwh,
+    financial,
+    rooftop_check,
+    forecast,
+    monthly_gen_kwh,
+    annual_gen_kwh,
     grid_offset_pct,
-    ghi_monthly,
+    load_profile,
+    tariff_per_unit,
+    tariff_category,
+    monthly_consumption_kwh,
   } = effectiveResult;
-
-  // Build chart data
-  const genVsConsData = MONTHS.map((month, i) => ({
-    month,
-    generation: Math.round(monthly_generation_kwh?.[i] || 0),
-    consumption: Math.round(monthly_consumption_kwh?.[i] || 0),
-  }));
-
-  const ghiData = MONTHS.map((month, i) => ({
-    month,
-    ghi: ghi_monthly?.[i] || 0,
-  }));
 
   const metrics = [
     {
       label: 'System Capacity',
-      value: `${sizing?.system_kwp || 0} kWp`,
+      value: `${effectiveResult.system_kwp || 0} kWp`,
       icon: '⚡',
       color: 'from-yellow-400 to-amber-500',
     },
     {
       label: 'Number of Panels',
-      value: sizing?.num_panels || 0,
+      value: effectiveResult.num_panels || 0,
       icon: '🔲',
       color: 'from-blue-400 to-blue-600',
     },
     {
       label: 'Annual Generation',
-      value: `${(annual_generation_kwh || 0).toLocaleString()} kWh`,
+      value: `${(annual_gen_kwh || 0).toLocaleString()} kWh`,
       icon: '☀️',
       color: 'from-green-400 to-emerald-500',
     },
@@ -76,44 +64,42 @@ export default function SolarDashboard({ result, onRestart }) {
       color: 'from-cyan-400 to-teal-500',
     },
     {
-      label: 'Annual Savings',
-      value: formatInr(financials?.annual_savings),
+      label: 'Direct Savings',
+      value: formatInr(financial?.direct_use_savings),
       icon: '💰',
       color: 'from-solar-400 to-solar-600',
     },
     {
+      label: 'Export Savings',
+      value: formatInr(financial?.export_savings),
+      icon: '🔄',
+      color: 'from-cyan-400 to-blue-600',
+    },
+    {
       label: 'Payback Period',
-      value: `${financials?.payback_years || '—'} yrs`,
+      value: `${financial?.payback_years || '—'} yrs`,
       icon: '⏱️',
       color: 'from-purple-400 to-violet-500',
     },
     {
       label: '25-Year NPV',
-      value: formatInr(financials?.npv_25yr),
+      value: formatInr(financial?.npv),
       icon: '📈',
       color: 'from-pink-400 to-rose-500',
     },
     {
       label: 'IRR',
-      value: `${financials?.irr_pct || 0}%`,
+      value: `${financial?.irr || 0}%`,
       icon: '📊',
       color: 'from-indigo-400 to-indigo-600',
     },
     {
       label: 'CO₂ Offset',
-      value: `${(financials?.co2_offset_kg_per_year || 0).toLocaleString()} kg/yr`,
+      value: `${(financial?.co2_offset_kg || 0).toLocaleString()} kg/yr`,
       icon: '🌍',
       color: 'from-emerald-400 to-green-600',
     },
   ];
-
-  const tooltipStyle = {
-    background: 'rgba(10, 21, 56, 0.95)',
-    border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: '10px',
-    color: '#e2e8f0',
-    fontSize: '13px',
-  };
 
   return (
     <div className="animate-fade-in space-y-8">
@@ -136,6 +122,8 @@ export default function SolarDashboard({ result, onRestart }) {
         )}
       </div>
 
+      <RooftopWarningBanner rooftopCheck={rooftop_check} />
+
       {/* Metric cards grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         {metrics.map((m, i) => (
@@ -156,106 +144,32 @@ export default function SolarDashboard({ result, onRestart }) {
         ))}
       </div>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Generation vs Consumption */}
-        <div className="glass-card p-6">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">
-            Monthly Generation vs Consumption
-          </h3>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={genVsConsData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                <XAxis
-                  dataKey="month"
-                  tick={{ fill: '#64748b', fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fill: '#64748b', fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={50}
-                  tickFormatter={(v) => `${v}`}
-                />
-                <Tooltip contentStyle={tooltipStyle} formatter={(val) => [`${val} kWh`]} />
-                <Legend
-                  wrapperStyle={{ fontSize: '12px', color: '#94a3b8' }}
-                  iconType="circle"
-                  iconSize={8}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="generation"
-                  stroke="#22c55e"
-                  strokeWidth={2.5}
-                  dot={{ fill: '#22c55e', r: 4 }}
-                  activeDot={{ r: 6, fill: '#22c55e' }}
-                  name="Solar Generation"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="consumption"
-                  stroke="#3b82f6"
-                  strokeWidth={2.5}
-                  dot={{ fill: '#3b82f6', r: 4 }}
-                  activeDot={{ r: 6, fill: '#3b82f6' }}
-                  name="Consumption"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+      <ForecastChart
+        monthlyUnits={monthly_consumption_kwh || effectiveResult.monthly_units || []}
+        forecast={forecast}
+        monthlyGen={monthly_gen_kwh || []}
+      />
 
-        {/* NASA Irradiance */}
-        <div className="glass-card p-6">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">
-            Monthly NASA Irradiance (kWh/m²/day)
-          </h3>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={ghiData} barCategoryGap="15%" margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                <XAxis
-                  dataKey="month"
-                  tick={{ fill: '#64748b', fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fill: '#64748b', fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={40}
-                />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  formatter={(val) => [`${val} kWh/m²/day`, 'GHI']}
-                />
-                <Bar dataKey="ghi" radius={[6, 6, 0, 0]} name="GHI">
-                  {ghiData.map((_, i) => (
-                    <Cell key={i} fill={`hsl(${40 + i * 3}, 90%, ${55 + i}%)`} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
+      <LoadProfileCard
+        tariffPerUnit={tariff_per_unit}
+        tariffCategory={tariff_category}
+        loadProfile={load_profile}
+        financial={financial}
+      />
 
       {/* Financial summary bar */}
       <div className="glass-card p-6">
         <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Financial Summary</h3>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-          <FinBlock label="CAPEX" value={formatInr(financials?.capex)} />
-          <FinBlock label="Annual Savings" value={formatInr(financials?.annual_savings)} highlight />
-          <FinBlock label="O&M Cost/yr" value={formatInr(financials?.om_cost_per_year)} />
-          <FinBlock label="Net Benefit/yr" value={formatInr(financials?.net_annual_benefit)} highlight />
-          <FinBlock label="25-Year NPV" value={formatInr(financials?.npv_25yr)} highlight />
+          <FinBlock label="CAPEX" value={formatInr(financial?.capex)} />
+          <FinBlock label="Direct Savings" value={formatInr(financial?.direct_use_savings)} highlight />
+          <FinBlock label="Export Savings" value={formatInr(financial?.export_savings)} />
+          <FinBlock label="Total Savings/yr" value={formatInr(financial?.total_annual_savings)} highlight />
+          <FinBlock label="25-Year NPV" value={formatInr(financial?.npv)} highlight />
         </div>
       </div>
+
+      <ReportDisplay calcResult={effectiveResult} />
 
       {/* Actions */}
       <div className="flex justify-center gap-4 pb-8">
