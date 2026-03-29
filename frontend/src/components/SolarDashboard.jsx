@@ -1,3 +1,6 @@
+/* File overview: frontend/src/components/SolarDashboard.jsx
+ * Purpose: displays computed solar analysis, KPIs, charts, and printable report sections.
+ */
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { gsap } from 'gsap';

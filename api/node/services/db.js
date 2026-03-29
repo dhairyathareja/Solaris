@@ -1,3 +1,6 @@
+/* File overview: api/node/services/db.js
+ * Purpose: Mongo schemas plus best-effort database connection helpers.
+ */
 const mongoose = require('mongoose');
 
 let connected = false;

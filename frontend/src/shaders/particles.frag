@@ -1,3 +1,5 @@
+// File overview: frontend/src/shaders/particles.frag
+// Purpose: colors and soft-fades each particle point in the fragment stage.
 varying float vAlpha;
 
 void main() {

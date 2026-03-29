@@ -1,3 +1,6 @@
+/* File overview: frontend/src/components/LoadProfileCard.jsx
+ * Purpose: summarizes self-consumption split and related annual savings impact.
+ */
 function pct(v) {
   return `${(Number(v || 0) * 100).toFixed(1)}%`;
 }

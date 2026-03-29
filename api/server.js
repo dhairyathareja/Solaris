@@ -1,3 +1,6 @@
+/* File overview: api/server.js
+ * Purpose: legacy API bootstrap with CORS and route wiring.
+ */
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');

@@ -1,3 +1,6 @@
+/* File overview: api/node/server.js
+ * Purpose: primary Node API bootstrap with CORS, DB init, and route registration.
+ */
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');

@@ -1,3 +1,6 @@
+/* File overview: api/node/services/ocr.js
+ * Purpose: runs Tesseract OCR and returns normalized extracted text.
+ */
 const { createWorker } = require('tesseract.js');
 
 async function extractTextFromImage(imageBuffer) {

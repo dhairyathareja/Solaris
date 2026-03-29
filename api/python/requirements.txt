@@ -1,3 +1,5 @@
+# File overview: api/python/requirements.txt
+# Purpose: runtime dependencies for the Python compute microservice.
 fastapi
 uvicorn
 numpy

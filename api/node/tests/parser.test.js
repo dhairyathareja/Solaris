@@ -1,3 +1,6 @@
+/* File overview: api/node/tests/parser.test.js
+ * Purpose: regression coverage for OCR month/unit/tariff extraction behavior.
+ */
 const { parseBillText } = require('../services/parser');
 
 describe('parseBillText', () => {

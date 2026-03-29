@@ -1,3 +1,6 @@
+/* File overview: frontend/src/components/ForecastChart.jsx
+ * Purpose: visualizes historical, forecast, and generation series on a combined chart.
+ */
 import {
   ComposedChart,
   Line,

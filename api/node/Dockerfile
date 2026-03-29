@@ -1,3 +1,5 @@
+# File overview: api/node/Dockerfile
+# Purpose: container recipe for Node OCR/orchestration API service.
 FROM node:20-slim
 
 WORKDIR /app

@@ -1,7 +1,10 @@
+# File overview: api/python/tests/test_solar_engine.py
+# Purpose: verifies solar sizing and rooftop validation math outputs.
 from solar_engine import compute_metrics, validate_rooftop
 
 
 def test_size_system_known_case():
+    """Known input should produce a sizing value close to expected reference."""
     result = compute_metrics(
         annual_kwh=15000,
         avg_ghi=5.5,
@@ -13,6 +16,7 @@ def test_size_system_known_case():
 
 
 def test_validate_rooftop_sufficient_and_constrained():
+    """Rooftop validator should distinguish sufficient and constrained scenarios."""
     sufficient = validate_rooftop(num_panels=25, rooftop_sqm=200)
     assert sufficient['status'] == 'sufficient'
 
@@ -22,6 +26,7 @@ def test_validate_rooftop_sufficient_and_constrained():
 
 
 def test_compute_financials_prefers_higher_self_use():
+    """Higher direct consumption should improve annual savings for same generation."""
     base = dict(annual_kwh=12000, avg_ghi=5.2, tariff_per_unit=9)
     high_scr = compute_metrics(**base, self_consumption_ratio=0.7, export_ratio=0.3)
     low_scr = compute_metrics(**base, self_consumption_ratio=0.35, export_ratio=0.65)

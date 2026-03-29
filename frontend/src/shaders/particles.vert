@@ -1,3 +1,5 @@
+// File overview: frontend/src/shaders/particles.vert
+// Purpose: animates particle positions and alpha values in the vertex stage.
 uniform float uTime;
 attribute float aRandomFactor;
 varying vec2 vUv;

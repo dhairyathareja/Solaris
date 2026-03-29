@@ -1,3 +1,5 @@
+# File overview: docker-compose.prod.yml
+# Purpose: production stack behind nginx with private internal service network.
 services:
   node:
     build: ./api/node

@@ -1,3 +1,6 @@
+/* File overview: frontend/src/App.jsx
+ * Purpose: wires global visuals, route shell, and smooth scrolling behavior.
+ */
 import { useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import Lenis from 'lenis';

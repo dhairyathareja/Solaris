@@ -1,3 +1,6 @@
+/* File overview: frontend/src/components/SolarCanvas.jsx
+ * Purpose: renders ambient 3D background particles and visual post-processing.
+ */
 import React, { useRef, useMemo, useState, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { EffectComposer, Bloom, ChromaticAberration, Vignette } from '@react-three/postprocessing';

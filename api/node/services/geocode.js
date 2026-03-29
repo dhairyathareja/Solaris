@@ -1,3 +1,6 @@
+/* File overview: api/node/services/geocode.js
+ * Purpose: converts free-text address into latitude/longitude using Nominatim.
+ */
 const axios = require('axios');
 
 async function geocodeAddress(address) {

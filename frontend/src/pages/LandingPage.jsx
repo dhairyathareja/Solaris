@@ -1,3 +1,6 @@
+/* File overview: frontend/src/pages/LandingPage.jsx
+ * Purpose: marketing landing flow with staged reveal animations and CTA routing.
+ */
 import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { gsap } from 'gsap';

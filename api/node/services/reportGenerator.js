@@ -1,3 +1,6 @@
+/* File overview: api/node/services/reportGenerator.js
+ * Purpose: builds human-readable investment/advisory narrative from computed metrics.
+ */
 function inr(value) {
   const num = Number(value || 0);
   return `₹${Math.round(num).toLocaleString('en-IN')}`;

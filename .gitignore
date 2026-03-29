@@ -1,3 +1,5 @@
+# File overview: .gitignore
+# Purpose: excludes generated, local, and secret files from version control.
 # OS generated files
 .DS_Store
 .DS_Store?

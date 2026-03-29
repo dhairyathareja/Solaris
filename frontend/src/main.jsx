@@ -1,3 +1,6 @@
+/* File overview: frontend/src/main.jsx
+ * Purpose: boots React app and mounts router-enabled application root.
+ */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';

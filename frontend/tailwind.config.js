@@ -1,3 +1,6 @@
+/* File overview: frontend/tailwind.config.js
+ * Purpose: defines Tailwind scan paths and maps design tokens to utility colors.
+ */
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [

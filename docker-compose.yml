@@ -1,3 +1,5 @@
+# File overview: docker-compose.yml
+# Purpose: local development multi-service stack with live code mounts.
 services:
   node:
     build: ./api/node

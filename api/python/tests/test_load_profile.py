@@ -1,7 +1,10 @@
+# File overview: api/python/tests/test_load_profile.py
+# Purpose: ensures load-profile ratios remain bounded and normalized.
 from load_profile import compute_self_consumption
 
 
 def test_ratio_sum_is_one():
+    """Self-consumption plus export ratio must always equal 1.0."""
     for category in ['domestic', 'commercial', 'industrial']:
         data = compute_self_consumption(category)
         total = round(data['self_consumption_ratio'] + data['export_ratio'], 6)
@@ -11,6 +14,7 @@ def test_ratio_sum_is_one():
 
 
 def test_expected_ordering():
+    """Commercial profile should self-consume more than industrial, then domestic."""
     domestic = compute_self_consumption('domestic')['self_consumption_ratio']
     commercial = compute_self_consumption('commercial')['self_consumption_ratio']
     industrial = compute_self_consumption('industrial')['self_consumption_ratio']

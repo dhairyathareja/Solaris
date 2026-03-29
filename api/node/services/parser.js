@@ -1,3 +1,6 @@
+/* File overview: api/node/services/parser.js
+ * Purpose: parses OCR bill text into structured month, units, tariff, and DISCOM fields.
+ */
 const INDIAN_STATES = [
   'andhra pradesh', 'arunachal pradesh', 'assam', 'bihar', 'chhattisgarh',
   'goa', 'gujarat', 'haryana', 'himachal pradesh', 'jharkhand', 'karnataka',
@@ -56,12 +59,14 @@ const MONTH_ALIASES = {
 const MONTH_TOKEN_PATTERN = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
 const YEAR_TOKEN_PATTERN = "(?:'\\d{2}|(?:19|20)\\d{2}|\\d{2})";
 
+// Maps textual month tokens to a numeric index (0-11).
 function monthTokenToIndex(token) {
   if (!token) return null;
   const key = String(token).toLowerCase().replace(/[^a-z]/g, '');
   return Number.isInteger(MONTH_ALIASES[key]) ? MONTH_ALIASES[key] : null;
 }
 
+// Normalizes OCR number strings with support for decimal and thousand separators.
 function toNumber(raw) {
   if (raw == null) return null;
   let normalized = String(raw).trim().replace(/\s+/g, '');
@@ -99,6 +104,7 @@ function orderedUniqueNumbers(candidates) {
   return values;
 }
 
+// Parses date-like tokens such as 20/04/2025 or 20-Apr-2025.
 function parseMonthIndexFromDateToken(dateToken) {
   if (!dateToken) return null;
   const token = String(dateToken).trim();
@@ -117,6 +123,7 @@ function parseMonthIndexFromDateToken(dateToken) {
   return null;
 }
 
+// Applies strict month precedence: FROM DATE -> billing period range -> explicit labels.
 function detectBillingMonthIndex(text) {
   const fromDateRegex = /(?:from\s*date|fromdate)\s*[:\-]?\s*(\d{1,2}\s*[\/\-.]\s*(?:\d{1,2}|[a-z]{3,9})\s*[\/\-.]\s*\d{2,4})/i;
   const fromDateMatch = text.match(fromDateRegex);
@@ -165,6 +172,7 @@ function detectBillingMonthIndex(text) {
   return null;
 }
 
+// Extracts billed units using CONSUMPTION KWH-first heuristics.
 function findBilledUnits(text) {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const perLinePatterns = [
@@ -256,6 +264,7 @@ function findMonthlyHistoryMap(text) {
   return detectedCount >= 3 ? map : null;
 }
 
+// Finds tariff from common unit-rate and energy-charge patterns.
 function findTariff(text) {
   const tariffPatterns = [
     /(?:unit\s*rate|rate\s*(?:per\s*unit)?|tariff|rate\s*\/\s*unit)\s*[:=\-₹]?\s*([\d.,]{1,8})/i,
@@ -289,6 +298,7 @@ function findSanctionedLoadKw(text) {
   return null;
 }
 
+// Identifies DISCOM from known keyword aliases, then falls back to generic line match.
 function findDiscomName(text) {
   const lower = text.toLowerCase();
   const compact = lower.replace(/[^a-z]/g, '');
@@ -336,6 +346,7 @@ function getParseConfidence(parsed) {
   return 'low';
 }
 
+// Main parser pipeline: month + units + metadata extraction from OCR text.
 function parseBillText(ocrText) {
   const billingMonthIndex = detectBillingMonthIndex(ocrText);
   const billedUnits = findBilledUnits(ocrText);

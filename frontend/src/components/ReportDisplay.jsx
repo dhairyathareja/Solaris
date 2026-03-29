@@ -1,3 +1,6 @@
+/* File overview: frontend/src/components/ReportDisplay.jsx
+ * Purpose: formats generated narrative into readable, copyable bullet point insights.
+ */
 import { useMemo, useState } from 'react';
 
 function toBulletPoints(text) {

@@ -1,3 +1,6 @@
+/* File overview: frontend/vite.config.js
+ * Purpose: configures Vite dev server behavior and API proxy wiring.
+ */
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 

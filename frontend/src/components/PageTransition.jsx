@@ -1,3 +1,6 @@
+/* File overview: frontend/src/components/PageTransition.jsx
+ * Purpose: provides route transition overlays and GSAP-driven reveal animation.
+ */
 import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { gsap } from 'gsap';

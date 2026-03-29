@@ -1,3 +1,6 @@
+/* File overview: api/services/nasaPower.js
+ * Purpose: legacy irradiance fetch/aggregation from NASA POWER API.
+ */
 const axios = require('axios');
 
 /**

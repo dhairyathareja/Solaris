@@ -1,3 +1,6 @@
+/* File overview: api/node/services/nasa.js
+ * Purpose: fetches and normalizes monthly irradiance from NASA POWER API.
+ */
 const axios = require('axios');
 
 async function fetchMonthlyGhi(lat, lon) {

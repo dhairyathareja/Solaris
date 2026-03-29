@@ -1,3 +1,6 @@
+/* File overview: api/services/solarEngine.js
+ * Purpose: legacy sizing, generation, and financial engine calculations.
+ */
 const Finance = require('financejs');
 const finance = new Finance();
 

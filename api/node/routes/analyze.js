@@ -1,3 +1,6 @@
+/* File overview: api/node/routes/analyze.js
+ * Purpose: main API workflow for bill parsing, forecasting, sizing, and report generation.
+ */
 const express = require('express');
 const multer = require('multer');
 const axios = require('axios');
@@ -37,6 +40,7 @@ function errorJson(error, detail) {
   return { error, detail };
 }
 
+// Standardized error sender used across all endpoints.
 function sendError(res, status, error, detail) {
   return res.status(status).json(errorJson(error, detail));
 }
@@ -75,6 +79,7 @@ function pickFirst(values) {
   return values.length ? values[0] : null;
 }
 
+// Filename fallback when OCR does not expose a bill month.
 function detectMonthFromFilename(fileName) {
   if (!fileName) return null;
   const value = String(fileName).toLowerCase();
@@ -94,6 +99,7 @@ function detectMonthFromFilename(fileName) {
   return null;
 }
 
+// Fills missing months using robust outlier filtering + seasonal interpolation.
 function estimateMonthlyUnits(monthValues) {
   const numericValues = monthValues.map((value) => {
     const num = Number(value);
@@ -146,6 +152,7 @@ function toAnnualChangePct(monthlyUnits) {
   return ((last - first) * 12 / monthlyUnits.length / first) * 100;
 }
 
+// Calls Python compute microservice and normalizes common network failures.
 async function callPython(endpoint, payload, timeout = 20000) {
   try {
     const response = await axios.post(`${PYTHON_SERVICE_URL}${endpoint}`, payload, { timeout });
@@ -159,6 +166,7 @@ async function callPython(endpoint, payload, timeout = 20000) {
   }
 }
 
+// Uses cached irradiance when available, otherwise fetches and stores fresh monthly GHI.
 async function getMonthlyIrradiance(lat, lon) {
   const key = `${lat.toFixed(2)}_${lon.toFixed(2)}`;
 
@@ -189,6 +197,7 @@ function computeMonthlyGeneration(systemKwp, irradianceMonthly) {
   });
 }
 
+// Builds the final response contract returned to frontend consumers.
 function finalizeResponse({
   sessionId,
   payload,
@@ -249,10 +258,12 @@ router.get('/health', (req, res) => {
 });
 
 router.post('/analyze-bill', upload.any(), async (req, res) => {
+// Lightweight liveness probe for reverse proxy and deployment checks.
   try {
     const files = (req.files || []).filter((item) => item.fieldname === 'file' || item.fieldname === 'files');
     if (!files.length) {
       return sendError(res, 400, 'validation_error', 'No file uploaded');
+// OCR extraction endpoint for one or more bill images.
     }
 
     if (files.length > 12) {
@@ -405,12 +416,14 @@ router.post('/analyze-rooftop', async (req, res) => {
   }
 });
 
+// Validates expected 12-element monthly consumption input payload.
 function isValidMonthlyUnits(values) {
   return Array.isArray(values)
     && values.length === 12
     && values.every((val) => Number.isFinite(Number(val)));
 }
 
+// Main orchestration endpoint: geocode -> irradiance -> forecast -> load profile -> compute.
 router.post('/calculate', async (req, res) => {
   try {
     const payload = req.body || {};

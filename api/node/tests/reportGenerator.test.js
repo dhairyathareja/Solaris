@@ -1,3 +1,6 @@
+/* File overview: api/node/tests/reportGenerator.test.js
+ * Purpose: validates generated advisory narrative quality and scenario variation.
+ */
 const { generateReport } = require('../services/reportGenerator');
 
 describe('generateReport', () => {

@@ -1,3 +1,5 @@
+# File overview: frontend/Dockerfile
+# Purpose: local development container for Vite dev server.
 FROM node:20-slim
 
 WORKDIR /app

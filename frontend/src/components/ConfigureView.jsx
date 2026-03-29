@@ -1,3 +1,6 @@
+/* File overview: frontend/src/components/ConfigureView.jsx
+ * Purpose: collects site configuration, geocodes address, and triggers solar computation.
+ */
 import { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { gsap } from 'gsap';

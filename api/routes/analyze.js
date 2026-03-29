@@ -1,3 +1,6 @@
+/* File overview: api/routes/analyze.js
+ * Purpose: legacy route set for bill analysis and sizing flow.
+ */
 const express = require('express');
 const multer = require('multer');
 const { extractBillData } = require('../services/claudeClient');

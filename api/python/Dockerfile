@@ -1,3 +1,5 @@
+# File overview: api/python/Dockerfile
+# Purpose: container recipe for the Python FastAPI compute service.
 FROM python:3.11-slim
 
 WORKDIR /app

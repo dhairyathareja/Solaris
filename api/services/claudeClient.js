@@ -1,3 +1,6 @@
+/* File overview: api/services/claudeClient.js
+ * Purpose: legacy Claude-Vision extraction helper for bill fields.
+ */
 const Anthropic = require('@anthropic-ai/sdk');
 
 const SYSTEM_PROMPT = `Extract from this electricity bill image and return ONLY valid JSON, no preamble:

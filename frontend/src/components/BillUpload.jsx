@@ -1,3 +1,6 @@
+/* File overview: frontend/src/components/BillUpload.jsx
+ * Purpose: handles bill upload UX, OCR batch submission, and normalized month data flow.
+ */
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCanvas } from '../context/CanvasContext';

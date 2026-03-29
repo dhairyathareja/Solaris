@@ -1,3 +1,6 @@
+/* File overview: frontend/src/index.css
+ * Purpose: global design tokens, base styles, utility classes, and print styling.
+ */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

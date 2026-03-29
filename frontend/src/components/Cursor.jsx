@@ -1,3 +1,6 @@
+/* File overview: frontend/src/components/Cursor.jsx
+ * Purpose: draws and animates the custom pointer for desktop interactions.
+ */
 import { useEffect, useRef } from 'react';
 import { gsap } from 'gsap';
 

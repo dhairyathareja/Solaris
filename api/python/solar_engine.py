@@ -1,8 +1,11 @@
+# File overview: api/python/solar_engine.py
+# Purpose: computes sizing, generation, and financial outputs for solar scenarios.
 import math
 from typing import Optional
 
 import numpy_financial as npf
 
+# Core engineering/economic constants used in deterministic calculations.
 PANEL_WATT = 400
 PANEL_AREA_SQM = 1.7
 PACKING_EFFICIENCY = 0.80
@@ -23,29 +26,37 @@ def compute_metrics(
     export_ratio: float,
     system_kwp_override: Optional[float] = None,
 ) -> dict:
+    """Compute system size, generation, savings, and investment metrics."""
+    # Base system size from annual demand and location irradiance.
     base_kwp = annual_kwh / (avg_ghi * PERFORMANCE_RATIO * 365)
+    # Allow rooftop-constrained override when provided by caller.
     system_kwp = float(system_kwp_override) if system_kwp_override is not None else base_kwp
     system_kwp = max(system_kwp, 0.0)
     num_panels = math.ceil(system_kwp / (PANEL_WATT / 1000))
     min_area = (num_panels * PANEL_AREA_SQM) / PACKING_EFFICIENCY
 
+    # Annual generation estimate from capacity, irradiance, and performance ratio.
     annual_generation = system_kwp * avg_ghi * PERFORMANCE_RATIO * 365
     capex = system_kwp * CAPEX_PER_KWP
 
+    # Clamp and normalize ratios so direct-use + export remains coherent.
     self_consumption_ratio = min(max(float(self_consumption_ratio), 0.0), 1.0)
     export_ratio = min(max(float(export_ratio), 0.0), 1.0)
     ratio_sum = self_consumption_ratio + export_ratio
     if ratio_sum > 0:
-      self_consumption_ratio = self_consumption_ratio / ratio_sum
-      export_ratio = export_ratio / ratio_sum
+        self_consumption_ratio = self_consumption_ratio / ratio_sum
+        export_ratio = export_ratio / ratio_sum
 
+    # Split monetization into direct offset and exported energy credit.
     direct_use_savings = annual_generation * self_consumption_ratio * tariff_per_unit
     export_savings = annual_generation * export_ratio * NET_METERING_RATE
     total_annual_savings = direct_use_savings + export_savings
 
+    # O&M is modeled as a fixed CAPEX percentage.
     om_cost = capex * OM_RATE
     net_annual = total_annual_savings - om_cost
 
+    # Compute investment KPIs over panel lifetime.
     payback_years = capex / net_annual if net_annual > 0 else float('inf')
     cash_flows = [-capex] + [net_annual] * PANEL_LIFETIME_YEARS
     npv = float(npf.npv(DISCOUNT_RATE, cash_flows))
@@ -53,6 +64,7 @@ def compute_metrics(
     irr_val = npf.irr(cash_flows)
     irr_pct = float(irr_val * 100) if irr_val is not None and not math.isnan(irr_val) else 0.0
 
+    # Environmental benefit estimate based on grid emission factor.
     co2_offset = annual_generation * CO2_FACTOR
 
     return {
@@ -76,9 +88,11 @@ def compute_metrics(
 
 
 def validate_rooftop(num_panels: int, rooftop_sqm: float) -> dict:
+    """Check whether required panel footprint fits on provided rooftop area."""
     min_area = (num_panels * PANEL_AREA_SQM) / PACKING_EFFICIENCY
     provided = max(float(rooftop_sqm), 0.0)
 
+    # Full-fit case: rooftop is sufficient for target panel count.
     if provided >= min_area:
         return {
             'status': 'sufficient',
@@ -87,6 +101,7 @@ def validate_rooftop(num_panels: int, rooftop_sqm: float) -> dict:
             'warning': None,
         }
 
+    # Constrained case: compute max feasible panels and equivalent kWp.
     max_panels = math.floor((provided * PACKING_EFFICIENCY) / PANEL_AREA_SQM)
     max_panels = max(max_panels, 0)
     fitted_kwp = max_panels * (PANEL_WATT / 1000)

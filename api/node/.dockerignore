@@ -1,3 +1,5 @@
+# File overview: api/node/.dockerignore
+# Purpose: excludes local Node artifacts from Docker build context.
 node_modules
 coverage
 .git

@@ -1,3 +1,6 @@
+/* File overview: frontend/src/context/CanvasContext.jsx
+ * Purpose: shared canvas animation state used across visual components.
+ */
 import { createContext, useContext, useState } from 'react';
 
 const CanvasContext = createContext();

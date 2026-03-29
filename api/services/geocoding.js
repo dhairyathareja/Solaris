@@ -1,3 +1,6 @@
+/* File overview: api/services/geocoding.js
+ * Purpose: legacy geocoding helper backed by OpenStreetMap Nominatim.
+ */
 const axios = require('axios');
 
 /**

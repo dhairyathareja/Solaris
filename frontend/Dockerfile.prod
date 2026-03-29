@@ -1,3 +1,5 @@
+# File overview: frontend/Dockerfile.prod
+# Purpose: builds the production SPA assets and serves them through nginx.
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
